@@ -1,0 +1,12 @@
+.directory
+/.settings 
+/.buildpath
+/.project
+*.kate-swp
+attic
+/core
+/Debug
+/Release
+/kernels_color_first
+/clt
+/clt_big_endian
