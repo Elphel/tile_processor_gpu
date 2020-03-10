@@ -212,39 +212,40 @@ int main(int argc, char **argv)
     // CLT testing
 
     const char* kernel_file[] = {
-    		"/data_ssd/git/cuda_dtt8x8/clt/main_chn0_transposed.kernel",
-			"/data_ssd/git/cuda_dtt8x8/clt/main_chn1_transposed.kernel",
-			"/data_ssd/git/cuda_dtt8x8/clt/main_chn2_transposed.kernel",
-			"/data_ssd/git/cuda_dtt8x8/clt/main_chn3_transposed.kernel"};
+    		"/data_ssd/git/tile_processor_gpu/clt/main_chn0_transposed.kernel",
+			"/data_ssd/git/tile_processor_gpu/clt/main_chn1_transposed.kernel",
+			"/data_ssd/git/tile_processor_gpu/clt/main_chn2_transposed.kernel",
+			"/data_ssd/git/tile_processor_gpu/clt/main_chn3_transposed.kernel"};
 
     const char* kernel_offs_file[] = {
-    		"/data_ssd/git/cuda_dtt8x8/clt/main_chn0_transposed.kernel_offsets",
-			"/data_ssd/git/cuda_dtt8x8/clt/main_chn1_transposed.kernel_offsets",
-			"/data_ssd/git/cuda_dtt8x8/clt/main_chn2_transposed.kernel_offsets",
-			"/data_ssd/git/cuda_dtt8x8/clt/main_chn3_transposed.kernel_offsets"};
+    		"/data_ssd/git/tile_processor_gpu/clt/main_chn0_transposed.kernel_offsets",
+			"/data_ssd/git/tile_processor_gpu/clt/main_chn1_transposed.kernel_offsets",
+			"/data_ssd/git/tile_processor_gpu/clt/main_chn2_transposed.kernel_offsets",
+			"/data_ssd/git/tile_processor_gpu/clt/main_chn3_transposed.kernel_offsets"};
 
     const char* image_files[] = {
-    		"/data_ssd/git/cuda_dtt8x8/clt/main_chn0.bayer",
-			"/data_ssd/git/cuda_dtt8x8/clt/main_chn1.bayer",
-			"/data_ssd/git/cuda_dtt8x8/clt/main_chn2.bayer",
-			"/data_ssd/git/cuda_dtt8x8/clt/main_chn3.bayer"};
+    		"/data_ssd/git/tile_processor_gpu/clt/main_chn0.bayer",
+			"/data_ssd/git/tile_processor_gpu/clt/main_chn1.bayer",
+			"/data_ssd/git/tile_processor_gpu/clt/main_chn2.bayer",
+			"/data_ssd/git/tile_processor_gpu/clt/main_chn3.bayer"};
 
     const char* ports_offs_xy_file[] = {
-    		"/data_ssd/git/cuda_dtt8x8/clt/main_chn0.portsxy",
-			"/data_ssd/git/cuda_dtt8x8/clt/main_chn1.portsxy",
-			"/data_ssd/git/cuda_dtt8x8/clt/main_chn2.portsxy",
-			"/data_ssd/git/cuda_dtt8x8/clt/main_chn3.portsxy"};
+    		"/data_ssd/git/tile_processor_gpu/clt/main_chn0.portsxy",
+			"/data_ssd/git/tile_processor_gpu/clt/main_chn1.portsxy",
+			"/data_ssd/git/tile_processor_gpu/clt/main_chn2.portsxy",
+			"/data_ssd/git/tile_processor_gpu/clt/main_chn3.portsxy"};
 
     const char* ports_clt_file[] = { // never referenced
-    		"/data_ssd/git/cuda_dtt8x8/clt/main_chn0.clt",
-			"/data_ssd/git/cuda_dtt8x8/clt/main_chn1.clt",
-			"/data_ssd/git/cuda_dtt8x8/clt/main_chn2.clt",
-			"/data_ssd/git/cuda_dtt8x8/clt/main_chn3.clt"};
+    		"/data_ssd/git/tile_processor_gpu/clt/main_chn0.clt",
+			"/data_ssd/git/tile_processor_gpu/clt/main_chn1.clt",
+			"/data_ssd/git/tile_processor_gpu/clt/main_chn2.clt",
+			"/data_ssd/git/tile_processor_gpu/clt/main_chn3.clt"};
     const char* result_rbg_file[] = {
-    		"/data_ssd/git/cuda_dtt8x8/clt/main_chn0.rbg",
-			"/data_ssd/git/cuda_dtt8x8/clt/main_chn1.rbg",
-			"/data_ssd/git/cuda_dtt8x8/clt/main_chn2.rbg",
-			"/data_ssd/git/cuda_dtt8x8/clt/main_chn3.rbg"};
+    		"/data_ssd/git/tile_processor_gpu/clt/main_chn0.rbg",
+			"/data_ssd/git/tile_processor_gpu/clt/main_chn1.rbg",
+			"/data_ssd/git/tile_processor_gpu/clt/main_chn2.rbg",
+			"/data_ssd/git/tile_processor_gpu/clt/main_chn3.rbg"};
+    const char* result_corr_file = "/data_ssd/git/tile_processor_gpu/clt/main_corr.corr";
     // not yet used
     float lpf_sigmas[3] = {0.9f, 0.9f, 0.9f}; // G, B, G
 
@@ -272,10 +273,12 @@ int main(int argc, char **argv)
     int KERN_TILES = KERNELS_HOR *  KERNELS_VERT * NUM_COLORS;
     int KERN_SIZE =  KERN_TILES * 4 * 64;
 
+    int CORR_SIZE = (2 * DTT_SIZE -1) * (2 * DTT_SIZE -1);
 
     float            * host_kern_buf =  (float *)malloc(KERN_SIZE * sizeof(float));
 
     struct tp_task     task_data [TILESX*TILESY]; // maximal length - each tile
+    int                corr_indices         [NUM_PAIRS*TILESX*TILESY];
 
     // host array of pointers to GPU memory
     float            * gpu_kernels_h        [NUM_CAMS];
@@ -288,6 +291,10 @@ int main(int argc, char **argv)
     float            * gpu_corr_images_h    [NUM_CAMS];
 #endif
 
+    float            * gpu_corrs;
+//    float            * gpu_corr_indices;
+    int              * gpu_corr_indices;
+    int                num_corrs;
     // GPU pointers to GPU pointers to memory
     float           ** gpu_kernels; //           [NUM_CAMS];
     struct CltExtra ** gpu_kernel_offsets; //    [NUM_CAMS];
@@ -300,6 +307,8 @@ int main(int argc, char **argv)
     struct tp_task  * gpu_tasks;
     size_t  dstride; // in bytes !
     size_t  dstride_rslt; // in bytes !
+    size_t  dstride_corr; // in bytes ! for one 2d phase correlation (padded 15x15x4 bytes)
+
 
     float lpf_rbg[3][64];
     for (int ncol = 0; ncol < 3; ncol++) {
@@ -339,9 +348,12 @@ int main(int argc, char **argv)
 				IMG_WIDTH + DTT_SIZE,         // int width,
 				3*(IMG_HEIGHT + DTT_SIZE));   // int height);
 #endif
-
-
     }
+    // allocates one correlation kernel per line (15x15 floats), number of rows - number of tiles * number of pairs
+    gpu_corrs = alloc_image_gpu(
+    		&dstride_corr,                  // in bytes ! for one 2d phase correlation (padded 15x15x4 bytes)
+			CORR_SIZE,                      // int width,
+			NUM_PAIRS * TILESX * TILESY);   // int height);
     // read channel images (assuming host_kern_buf size > image size, reusing it)
     for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
         readFloatsFromFile(
@@ -361,8 +373,24 @@ int main(int argc, char **argv)
 				ports_offs_xy_file[ncam]); // 			   char *  path) // file path
     }
 
+    // build TP task that processes all tiles in linescan order
+    for (int ty = 0; ty < TILESY; ty++){
+        for (int tx = 0; tx < TILESX; tx++){
+            int nt = ty * TILESX + tx;
+            task_data[nt].task = 0xf | (((1 << NUM_PAIRS)-1) << TASK_CORR_BITS);
+            task_data[nt].txy = tx + (ty << 16);
+            for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
+                task_data[nt].xy[ncam][0] = tile_coords_h[ncam][nt][0];
+                task_data[nt].xy[ncam][1] = tile_coords_h[ncam][nt][1];
+            }
+        }
+    }
+
+    int tp_task_size =  sizeof(task_data)/sizeof(struct tp_task);
+
 
 #ifdef DBG_TILE
+#ifdef DBG0
 //#define NUM_TEST_TILES 128
 #define NUM_TEST_TILES 1
     for (int t = 0; t < NUM_TEST_TILES; t++) {
@@ -375,27 +403,33 @@ int main(int argc, char **argv)
     		task_data[t].xy[ncam][1] = tile_coords_h[ncam][nt][1];
     	}
     }
-    int tp_task_size =  NUM_TEST_TILES; // sizeof(task_data)/sizeof(float);
+    tp_task_size =  NUM_TEST_TILES; // sizeof(task_data)/sizeof(float);
 
-#else
-    // build TP task that processes all tiles in linescan order
-    for (int ty = 0; ty < TILESY; ty++){
-        for (int tx = 0; tx < TILESX; tx++){
-            int nt = ty * TILESX + tx;
-            task_data[nt].task = 1;
-            task_data[nt].txy = tx + (ty << 16);
-            for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
-                task_data[nt].xy[ncam][0] = tile_coords_h[ncam][nt][0];
-                task_data[nt].xy[ncam][1] = tile_coords_h[ncam][nt][1];
-            }
-        }
-    }
-
-    int tp_task_size =  sizeof(task_data)/sizeof(struct tp_task);
+#endif
 #endif
 
     // segfault in the next
     gpu_tasks = (struct tp_task  *) copyalloc_kernel_gpu((float * ) &task_data, tp_task_size * (sizeof(struct tp_task)/sizeof(float)));
+
+    // build corr_indices
+    num_corrs = 0;
+    for (int ty = 0; ty < TILESY; ty++){
+    	for (int tx = 0; tx < TILESX; tx++){
+    		int nt = ty * TILESX + tx;
+    		int cm = (task_data[nt].task >> TASK_CORR_BITS) & ((1 << NUM_PAIRS)-1);
+    		if (cm){
+    			for (int b = 0; b < NUM_PAIRS; b++) if ((cm & (1 << b)) != 0) {
+    				corr_indices[num_corrs++] = (nt << CORR_PAIR_SHIFT) | b;
+    			}
+    		}
+    	}
+    }
+    // num_corrs now has the total number of correlations
+    // copy corr_indices to gpu
+//    gpu_corr_indices = (float  *) copyalloc_kernel_gpu((float * ) corr_indices, num_corrs);
+    gpu_corr_indices = (int  *) copyalloc_kernel_gpu((float * ) corr_indices, num_corrs);
+    // will need to pass num_corrs too
+
 
     // Now copy arrays of per-camera pointers to GPU memory to GPU itself
 
@@ -440,9 +474,11 @@ int main(int argc, char **argv)
 				gpu_images,            // 		float           ** gpu_images,
 				gpu_tasks,             // 		struct tp_task  * gpu_tasks,
 				gpu_clt,               //       float           ** gpu_clt,            // [NUM_CAMS][TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
+//				gpu_corrs,             // 		float            * gpu_corrs,          // [][15x15] - padded
 				dstride/sizeof(float), // 		size_t            dstride, // for gpu_images
+//				dstride_corr/sizeof(float), //size_t             dstride_corr,       // in floats: padded correlation size
 				tp_task_size,          // 		int               num_tiles) // number of tiles in task
-				7); // 0); // 7);                    //       int               lpf_mask)            // apply lpf to colors : bit 0 - red, bit 1 - blue, bit2 - green
+				0); // 7); // 0); // 7);                    //       int               lpf_mask)            // apply lpf to colors : bit 0 - red, bit 1 - blue, bit2 - green
 
 
         getLastCudaError("Kernel execution failed");
@@ -584,6 +620,82 @@ int main(int argc, char **argv)
 
     free(cpu_corr_image);
 #endif
+
+
+
+
+#ifndef NOCORR
+    // testing corr
+    dim3 threads_corr(CORR_THREADS_PER_TILE, CORR_TILES_PER_BLOCK, 1);
+    printf("threads_corr=(%d, %d, %d)\n",threads_corr.x,threads_corr.y,threads_corr.z);
+    StopWatchInterface *timerCORR = 0;
+    sdkCreateTimer(&timerCORR);
+
+    for (int i = i0; i < numIterations; i++)
+    {
+    	if (i == 0)
+    	{
+    		checkCudaErrors(cudaDeviceSynchronize());
+    		sdkResetTimer(&timerCORR);
+    		sdkStartTimer(&timerCORR);
+    	}
+
+        dim3 grid_corr((num_corrs + CORR_TILES_PER_BLOCK-1) / CORR_TILES_PER_BLOCK,1,1);
+        correlate2D<<<grid_corr,threads_corr>>>(
+		gpu_clt,   // float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
+		3,         // int               colors,             // number of colors (3/1)
+		0.25,      // float             scale0,             // scale for R
+		0.25,      // float             scale1,             // scale for B
+		0.5,       // float             scale2,             // scale for G
+		30.0,      // float             fat_zero,           // here - absolute
+		num_corrs, // size_t            num_corr_tiles,     // number of correlation tiles to process
+		gpu_corr_indices, //  int             * gpu_corr_indices,   // packed tile+pair
+		dstride_corr/sizeof(float), // const size_t      corr_stride,        // in floats
+		gpu_corrs); // float           * gpu_corrs);          // correlation output data
+    	getLastCudaError("Kernel failure");
+    	checkCudaErrors(cudaDeviceSynchronize());
+    	printf("test pass: %d\n",i);
+#ifdef DEBUG4
+    	break;
+#endif
+#ifdef DEBUG5
+    		break;
+#endif
+    }
+
+    sdkStopTimer(&timerCORR);
+    float avgTimeCORR = (float)sdkGetTimerValue(&timerCORR) / (float)numIterations;
+    sdkDeleteTimer(&timerCORR);
+    printf("Average CORR run time =%f ms\n",  avgTimeCORR);
+
+    int corr_size =        2 * CORR_OUT_RAD + 1;
+    int rslt_corr_size =   num_corrs * corr_size * corr_size;
+    float * cpu_corr = (float *)malloc(rslt_corr_size * sizeof(float));
+
+
+
+    checkCudaErrors(cudaMemcpy2D(
+    		cpu_corr,
+			(corr_size * corr_size) * sizeof(float),
+			gpu_corrs,
+			dstride_corr,
+			(corr_size * corr_size) * sizeof(float),
+			num_corrs,
+    		cudaMemcpyDeviceToHost));
+
+#ifndef NSAVE_CORR
+    		printf("Writing phase correlation data to %s\n",  result_corr_file);
+    		writeFloatsToFile(
+    				cpu_corr,    // float *       data, // allocated array
+					rslt_corr_size,    // int           size, // length in elements
+					result_corr_file); // 			   const char *  path) // file path
+#endif
+    		free(cpu_corr);
+#endif // ifndef NOCORR
+
+
+
+
 #ifdef SAVE_CLT
     free(cpu_clt);
 #endif
@@ -605,5 +717,7 @@ int main(int argc, char **argv)
 	checkCudaErrors(cudaFree(gpu_images));
 	checkCudaErrors(cudaFree(gpu_clt));
 //	checkCudaErrors(cudaFree(gpu_corr_images));
+	checkCudaErrors(cudaFree(gpu_corrs));
+	checkCudaErrors(cudaFree(gpu_corr_indices));
 	exit(0);
 }
