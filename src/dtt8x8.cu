@@ -273,7 +273,10 @@ int main(int argc, char **argv)
     int KERN_TILES = KERNELS_HOR *  KERNELS_VERT * NUM_COLORS;
     int KERN_SIZE =  KERN_TILES * 4 * 64;
 
-    int CORR_SIZE = (2 * DTT_SIZE -1) * (2 * DTT_SIZE -1);
+//    int CORR_SIZE = (2 * DTT_SIZE -1) * (2 * DTT_SIZE -1);
+    int CORR_SIZE = (2 * CORR_OUT_RAD + 1) * (2 * CORR_OUT_RAD + 1);
+
+
 
     float            * host_kern_buf =  (float *)malloc(KERN_SIZE * sizeof(float));
 
@@ -651,6 +654,7 @@ int main(int argc, char **argv)
 		num_corrs, // size_t            num_corr_tiles,     // number of correlation tiles to process
 		gpu_corr_indices, //  int             * gpu_corr_indices,   // packed tile+pair
 		dstride_corr/sizeof(float), // const size_t      corr_stride,        // in floats
+		CORR_OUT_RAD, // int               corr_radius,        // radius of the output correlation (7 for 15x15)
 		gpu_corrs); // float           * gpu_corrs);          // correlation output data
     	getLastCudaError("Kernel failure");
     	checkCudaErrors(cudaDeviceSynchronize());
