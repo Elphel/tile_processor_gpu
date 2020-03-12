@@ -313,7 +313,7 @@ int main(int argc, char **argv)
     size_t  dstride_corr; // in bytes ! for one 2d phase correlation (padded 15x15x4 bytes)
 
 
-    float lpf_rbg[3][64];
+    float lpf_rbg[3][64]; // not used
     for (int ncol = 0; ncol < 3; ncol++) {
     	if (lpf_sigmas[ncol] > 0.0) {
     		set_clt_lpf (
