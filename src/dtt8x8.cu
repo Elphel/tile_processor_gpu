@@ -46,6 +46,8 @@
 
 #include "dtt8x8.cuh"
 #include "TileProcessor.cuh"
+///#include "cuda_profiler_api.h"
+//#include "cudaProfiler.h"
 
 
 float * copyalloc_kernel_gpu(float * kernel_host,
@@ -246,8 +248,16 @@ int main(int argc, char **argv)
 			"/data_ssd/git/tile_processor_gpu/clt/main_chn2.rbg",
 			"/data_ssd/git/tile_processor_gpu/clt/main_chn3.rbg"};
     const char* result_corr_file = "/data_ssd/git/tile_processor_gpu/clt/main_corr.corr";
+    const char* result_textures_file = "/data_ssd/git/tile_processor_gpu/clt/texture.rgba";
     // not yet used
     float lpf_sigmas[3] = {0.9f, 0.9f, 0.9f}; // G, B, G
+
+    float port_offsets[NUM_CAMS][2] =  {// used only in textures to scale differences
+			{-0.5, -0.5},
+			{ 0.5, -0.5},
+			{-0.5,  0.5},
+			{ 0.5,  0.5}};
+    int texture_colors = 3; // result will be 3+1 RGBA (for mono - 2)
 
 
 /*
@@ -282,6 +292,7 @@ int main(int argc, char **argv)
 
     struct tp_task     task_data [TILESX*TILESY]; // maximal length - each tile
     int                corr_indices         [NUM_PAIRS*TILESX*TILESY];
+    int                texture_indices      [TILESX*TILESY];
 
     // host array of pointers to GPU memory
     float            * gpu_kernels_h        [NUM_CAMS];
@@ -295,9 +306,14 @@ int main(int argc, char **argv)
 #endif
 
     float            * gpu_corrs;
-//    float            * gpu_corr_indices;
     int              * gpu_corr_indices;
+
+    float            * gpu_textures;
+    int              * gpu_texture_indices;
+    float            * gpu_port_offsets;
     int                num_corrs;
+    int                num_textures;
+    int                num_ports = NUM_CAMS;
     // GPU pointers to GPU pointers to memory
     float           ** gpu_kernels; //           [NUM_CAMS];
     struct CltExtra ** gpu_kernel_offsets; //    [NUM_CAMS];
@@ -308,9 +324,10 @@ int main(int argc, char **argv)
     // GPU pointers to GPU memory
 //    float * gpu_tasks;
     struct tp_task  * gpu_tasks;
-    size_t  dstride; // in bytes !
-    size_t  dstride_rslt; // in bytes !
-    size_t  dstride_corr; // in bytes ! for one 2d phase correlation (padded 15x15x4 bytes)
+    size_t  dstride;          // in bytes !
+    size_t  dstride_rslt;     // in bytes !
+    size_t  dstride_corr;     // in bytes ! for one 2d phase correlation (padded 15x15x4 bytes)
+    size_t  dstride_textures; // in bytes ! for one rgba/ya 16x16 tile
 
 
     float lpf_rbg[3][64]; // not used
@@ -422,16 +439,38 @@ int main(int argc, char **argv)
     		int cm = (task_data[nt].task >> TASK_CORR_BITS) & ((1 << NUM_PAIRS)-1);
     		if (cm){
     			for (int b = 0; b < NUM_PAIRS; b++) if ((cm & (1 << b)) != 0) {
-    				corr_indices[num_corrs++] = (nt << CORR_PAIR_SHIFT) | b;
+    				corr_indices[num_corrs++] = (nt << CORR_NTILE_SHIFT) | b;
     			}
     		}
     	}
     }
     // num_corrs now has the total number of correlations
     // copy corr_indices to gpu
-//    gpu_corr_indices = (float  *) copyalloc_kernel_gpu((float * ) corr_indices, num_corrs);
     gpu_corr_indices = (int  *) copyalloc_kernel_gpu((float * ) corr_indices, num_corrs);
-    // will need to pass num_corrs too
+
+    // build texture_indices
+    num_textures = 0;
+    for (int ty = 0; ty < TILESY; ty++){
+    	for (int tx = 0; tx < TILESX; tx++){
+    		int nt = ty * TILESX + tx;
+    		int cm = (task_data[nt].task >> TASK_TEXTURE_BIT) & 1;
+    		if (cm){
+    			texture_indices[num_textures++] = (nt << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT);
+    		}
+    	}
+    }
+    // num_textures now has the total number of textures
+    // copy corr_indices to gpu
+    gpu_texture_indices = (int  *) copyalloc_kernel_gpu((float * ) texture_indices, num_textures);
+    // copy port indices to gpu
+    gpu_port_offsets = (float *) copyalloc_kernel_gpu((float * ) port_offsets, num_ports * 2);
+
+    // allocates one correlation kernel per line (15x15 floats), number of rows - number of tiles * number of pairs
+    int tile_texture_size = (texture_colors+1)*256;
+    gpu_textures = alloc_image_gpu(
+    		&dstride_textures,              // in bytes ! for one rgba/ya 16x16 tile
+			tile_texture_size,         // int width,
+			TILESX * TILESY);               // int height);
 
 
     // Now copy arrays of per-camera pointers to GPU memory to GPU itself
@@ -460,6 +499,7 @@ int main(int argc, char **argv)
     const int i0 = -1; // 0; // -1;
 #endif
     cudaFuncSetCacheConfig(convert_correct_tiles, cudaFuncCachePreferShared);
+///    cudaProfilerStart();
     float ** fgpu_kernel_offsets = (float **) gpu_kernel_offsets; //    [NUM_CAMS];
 
     for (int i = i0; i < numIterations; i++)
@@ -477,9 +517,7 @@ int main(int argc, char **argv)
 				gpu_images,            // 		float           ** gpu_images,
 				gpu_tasks,             // 		struct tp_task  * gpu_tasks,
 				gpu_clt,               //       float           ** gpu_clt,            // [NUM_CAMS][TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
-//				gpu_corrs,             // 		float            * gpu_corrs,          // [][15x15] - padded
 				dstride/sizeof(float), // 		size_t            dstride, // for gpu_images
-//				dstride_corr/sizeof(float), //size_t             dstride_corr,       // in floats: padded correlation size
 				tp_task_size,          // 		int               num_tiles) // number of tiles in task
 				0); // 7); // 0); // 7);                    //       int               lpf_mask)            // apply lpf to colors : bit 0 - red, bit 1 - blue, bit2 - green
 
@@ -625,9 +663,8 @@ int main(int argc, char **argv)
 #endif
 
 
-
-
 #ifndef NOCORR
+//    cudaProfilerStart();
     // testing corr
     dim3 threads_corr(CORR_THREADS_PER_TILE, CORR_TILES_PER_BLOCK, 1);
     printf("threads_corr=(%d, %d, %d)\n",threads_corr.x,threads_corr.y,threads_corr.z);
@@ -698,6 +735,96 @@ int main(int argc, char **argv)
 #endif // ifndef NOCORR
 
 
+// -----------------
+
+#ifndef NOTEXTURES
+//    cudaProfilerStart();
+    // testing textures
+    dim3 threads_texture(TEXTURE_THREADS_PER_TILE, TEXTURE_TILES_PER_BLOCK, 1);
+    dim3 grid_texture((num_textures + TEXTURE_TILES_PER_BLOCK-1) / TEXTURE_TILES_PER_BLOCK,1,1);
+    printf("threads_texture=(%d, %d, %d)\n",threads_texture.x,threads_texture.y,threads_texture.z);
+    printf("grid_texture=(%d, %d, %d)\n",grid_texture.x,grid_texture.y,grid_texture.z);
+    StopWatchInterface *timerTEXTURE = 0;
+    sdkCreateTimer(&timerTEXTURE);
+
+    for (int i = i0; i < numIterations; i++)
+    {
+    	if (i == 0)
+    	{
+    		checkCudaErrors(cudaDeviceSynchronize());
+    		sdkResetTimer(&timerTEXTURE);
+    		sdkStartTimer(&timerTEXTURE);
+    	}
+
+		// Channel0 weight = 0.294118
+		// Channel1 weight = 0.117647
+		// Channel2 weight = 0.588235
+
+        textures_gen<<<grid_texture,threads_texture>>> (
+        gpu_clt ,              // float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
+		num_textures,          // size_t            num_texture_tiles,  // number of texture tiles to process
+		gpu_texture_indices,   // int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
+		gpu_port_offsets,      // float           * port_offsets,       // relative ports x,y offsets - just to scale differences, may be approximate
+		texture_colors,        // int               colors,             // number of colors (3/1)
+		(texture_colors == 1), // int               is_lwir,            // do not perform shot correction
+		10.0,                  // float             min_shot,           // 10.0
+		3.0,                   // float             scale_shot,         // 3.0
+		1.5f,                  // float             diff_sigma,         // pixel value/pixel change
+		10.0f,                 // float             diff_threshold,     // pixel value/pixel change
+//		int               diff_gauss,         // when averaging images, use gaussian around average as weight (false - sharp all/nothing)
+		3.0,                   // float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
+		0.294118,                  // float             weight0,            // scale for R
+		0.117647,                  // float             weight1,            // scale for B
+		0.588235,                   // float             weight2,            // scale for G
+		1.0,                   // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
+//		1.0,                   // int               keep_weights,       // return channel weights after A in RGBA
+		dstride_textures/sizeof(float), // const size_t      texture_stride,     // in floats (now 256*4 = 1024)
+		gpu_textures);    // float           * gpu_texture_tiles);  // 4*16*16 rgba texture tiles
+
+    	getLastCudaError("Kernel failure");
+    	checkCudaErrors(cudaDeviceSynchronize());
+    	printf("test pass: %d\n",i);
+#ifdef DEBUG4
+    	break;
+#endif
+#ifdef DEBUG5
+    		break;
+#endif
+    }
+///	cudaProfilerStop();
+    sdkStopTimer(&timerTEXTURE);
+    float avgTimeTEXTURES = (float)sdkGetTimerValue(&timerTEXTURE) / (float)numIterations;
+    sdkDeleteTimer(&timerTEXTURE);
+    printf("Average Texture run time =%f ms\n",  avgTimeTEXTURES);
+
+    int rslt_texture_size =   num_textures * tile_texture_size;
+    float * cpu_textures = (float *)malloc(rslt_texture_size * sizeof(float));
+
+
+
+    checkCudaErrors(cudaMemcpy2D(
+    		cpu_textures,
+			tile_texture_size * sizeof(float),
+			gpu_textures,
+			dstride_textures,
+			tile_texture_size * sizeof(float),
+			num_textures,
+    		cudaMemcpyDeviceToHost));
+
+#ifndef NSAVE_TEXTURES
+    		printf("Writing phase texture data to %s\n",  result_textures_file);
+    		writeFloatsToFile(
+    				cpu_textures,    // float *       data, // allocated array
+					rslt_texture_size,    // int           size, // length in elements
+					result_textures_file); // 			   const char *  path) // file path
+#endif
+    		free(cpu_textures);
+#endif // ifndef NOTEXTURES
+
+
+
+
+
 
 
 #ifdef SAVE_CLT
@@ -723,5 +850,11 @@ int main(int argc, char **argv)
 //	checkCudaErrors(cudaFree(gpu_corr_images));
 	checkCudaErrors(cudaFree(gpu_corrs));
 	checkCudaErrors(cudaFree(gpu_corr_indices));
+	checkCudaErrors(cudaFree(gpu_texture_indices));
+	checkCudaErrors(cudaFree(gpu_port_offsets));
+	checkCudaErrors(cudaFree(gpu_textures));
+
+
+
 	exit(0);
 }
