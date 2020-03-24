@@ -73,6 +73,8 @@
 //#define DEBUG5 1
 //#define DEBUG6 1
 #define DEBUG7 1
+#define DEBUG8 1
+//#define DEBUG9 1
 
 
 #endif
@@ -128,6 +130,8 @@
 #define DTT_SIZE1        (DTT_SIZE + 1)
 #define DTT_SIZE2        (2 * DTT_SIZE)
 #define DTT_SIZE21       (DTT_SIZE2 + 1)
+//#define DTT_SIZE22       (DTT_SIZE2 + 2)
+#define MCLT_UNION_LEN   (DTT_SIZE2 * (DTT_SIZE2 + 2))
 #define DTT_SIZE4        (4 * DTT_SIZE)
 #define DTT_SIZE2M1      (DTT_SIZE2 - 1)
 
@@ -496,6 +500,21 @@ __device__ void debayer_shot(
 		float   * mclt_dst,  // [2* DTT_SIZE][DTT_SIZE1+ DTT_SIZE], // +1 to alternate column ports[16][17]
 		float   * mclt_tmp,
 		int       debug);
+__device__ void tile_combine_rgba(
+		int     colors,        // number of colors
+		float * mclt_tile,     // debayer
+		float * rgba,          // result
+		float * ports_rgb,     // average values of R,G,B for each camera (R0,R1,...,B2,B3) // null
+		float * max_diff,      // maximal (weighted) deviation of each channel from the average /null
+		float * port_offsets,  // [port]{x_off, y_off} - just to scale pixel value differences
+		float   diff_sigma,     // pixel value/pixel change
+		float   diff_threshold, // pixel value/pixel change
+		float   min_agree,      // minimal number of channels to agree on a point (real number to work with fuzzy averages)
+		float * chn_weights,     // color channel weights, sum == 1.0
+		int     dust_remove,     // Do not reduce average weight when only one image differes much from the average
+		int     keep_weights,   // return channel weights after A in RGBA - ALWAYS
+		int     debug
+		);
 
 
 __device__ void imclt_plane( // not implemented, not used
@@ -859,7 +878,7 @@ __global__ void textures_gen(
 		float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 		size_t            num_texture_tiles,  // number of texture tiles to process
 		int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
-		float           * port_offsets,       // relative ports x,y offsets - just to scale differences, may be approximate
+		float           * gpu_port_offsets,       // relative ports x,y offsets - just to scale differences, may be approximate
 		int               colors,             // number of colors (3/1)
 		int               is_lwir,            // do not perform shot correction
 		float             min_shot,           // 10.0
@@ -872,7 +891,7 @@ __global__ void textures_gen(
 		float             weight1,            // scale for B
 		float             weight2,            // scale for G
 		int               dust_remove,        // Do not reduce average weight when only one image differs much from the average
-		//		int               keep_weights,       // return channel weights after A in RGBA
+		int               keep_weights,       // return channel weights after A in RGBA (was removed)
 		const size_t      texture_stride,     // in floats (now 256*4 = 1024)
 		float           * gpu_texture_tiles)  // (number of colors +1)*16*16 rgba texture tiles
 {
@@ -885,22 +904,31 @@ __global__ void textures_gen(
 	}
 	// get number of tile
 	int tile_num = (gpu_texture_indices[tile_indx]) >> CORR_NTILE_SHIFT;
-	__shared__ union {
-		float clt_tiles  [NUM_CAMS][NUM_COLORS][4][DTT_SIZE][DTT_SIZE1]; // NUM_CAMS == 4
-		float mclt_debayer [NUM_CAMS][NUM_COLORS][2*DTT_SIZE][DTT_SIZE21];
-
-	} shr;
 	__shared__ float mclt_tiles [NUM_CAMS][NUM_COLORS][2*DTT_SIZE][DTT_SIZE21];
 	__shared__ union {
-		float mclt_tmp [NUM_CAMS][NUM_COLORS][2*DTT_SIZE][DTT_SIZE21];
+		float clt_tiles  [NUM_CAMS][NUM_COLORS][4][DTT_SIZE][DTT_SIZE1]; // NUM_CAMS == 4
+		float mclt_debayer [NUM_CAMS][NUM_COLORS][MCLT_UNION_LEN]; // to align with clt_tiles
+
+	} shr;
+	__shared__ union {
+		float mclt_tmp           [NUM_CAMS][NUM_COLORS][DTT_SIZE2][DTT_SIZE21];
+		float rgbaw              [NUM_COLORS+1 + NUM_CAMS + NUM_COLORS+1][DTT_SIZE2][DTT_SIZE21];
 		// add more
 	} shr1;
+	//	__shared__ float port_weights[NUM_CAMS][DTT_SIZE2 * DTT_SIZE21];
+	//	__shared__ float color_avg   [NUM_CAMS][DTT_SIZE2 * DTT_SIZE21];
 
+	__shared__ float port_offsets[NUM_CAMS][2];
+	__shared__ float ports_rgb   [NUM_CAMS][NUM_COLORS]; // return to system memory (optionally pass null to skip calculation)
+	__shared__ float max_diff [NUM_CAMS]; // return to system memory (optionally pass null to skip calculation)
+	if (threadIdx.x < 2){
+		port_offsets[camera_num][threadIdx.x] = * (gpu_port_offsets + 2 * camera_num + threadIdx.x);
+	}
 
 
 #ifdef DBG_TILE
 #ifdef DEBUG7
-	if ((tile_num == DBG_TILE)  && (threadIdx.x == 0)){
+	if ((tile_num == DBG_TILE)  && (threadIdx.x == 0) && (threadIdx.y == 0)){
 		printf("\ntextures_gen tile = %d\n",tile_num);
 		//    	debug_print_clt1(clt_tile1, color,  0xf); //
 		//        printf("\textures_gen tile = %d, pair=%d, color = %d   CAMERA22\n",tile_num, corr_pair,color);
@@ -919,14 +947,14 @@ __global__ void textures_gen(
 		float * mclt_tile = (float *) mclt_tiles [camera_num][color];
 		float * mclt_dst =  (float *) shr.mclt_debayer[camera_num][color];
 		float * mclt_tmp =  (float *) shr1.mclt_tmp[camera_num][color];
-//		float scale = 0.25;
+		//		float scale = 0.25;
 
 #pragma unroll
 		for (int q = 0; q < 4; q++) {
 			float *lpf = lpf_data[(colors > 1)? color : 3] + threadIdx.x; // lpf_data[3] - mono
 #pragma unroll
 			for (int i = 0; i < DTT_SIZE; i++){ // copy 32 rows (4 quadrants of 8 rows)
-//				*clt_tilei = *gpu_tile * (*lpf) * scale;
+				//				*clt_tilei = *gpu_tile * (*lpf) * scale;
 				*clt_tilei = *gpu_tile * (*lpf);
 				clt_tilei +=  DTT_SIZE1;
 				gpu_tile +=   DTT_SIZE;
@@ -935,7 +963,7 @@ __global__ void textures_gen(
 		}
 		__syncthreads();
 #ifdef DEBUG7
-		if ((tile_num == DBG_TILE)  && (threadIdx.x == 0)){
+		if ((tile_num == DBG_TILE)  && (threadIdx.x == 0) && (threadIdx.y == 0)){
 			printf("\ntextures_gen LPF for color = %d\n",color);
 			debug_print_lpf(lpf_data[(colors > 1)? color : 3]);
 
@@ -953,7 +981,7 @@ __global__ void textures_gen(
 		__syncthreads();// __syncwarp();
 
 #ifdef DEBUG7
-		if ((tile_num == DBG_TILE)  && (threadIdx.x == 0)){
+		if ((tile_num == DBG_TILE)  && (threadIdx.x == 0) && (threadIdx.y == 0)){
 			printf("\ntextures_gen mclt color = %d\n",color);
 			debug_print_mclt(
 					mclt_tile, //         [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports)
@@ -974,21 +1002,78 @@ __global__ void textures_gen(
 		} else {
 			// copy? - no, just remember to use mclt_tile, not mclt_dst
 		}
-#ifdef DEBUG7
-		if ((tile_num == DBG_TILE)  && (threadIdx.x == 0)){
-			printf("\ntextures_gen AFTER DEBAER color = %d\n",color);
-			debug_print_mclt(
-					mclt_dst, //         [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports)
-					color);
+#ifdef DEBUG77
+		//		float * mclt_dst =  (float *) shr.mclt_debayer[camera_num][color];
+
+		for (int ccam = 0; ccam < NUM_CAMS; ccam++) {
+			if ((tile_num == DBG_TILE)  && (threadIdx.x == 0) && (threadIdx.y == ccam)){
+				printf("\ntextures_gen AFTER DEBAER cam= %d, color = %d\n",threadIdx.y, color);
+				debug_print_mclt(
+						mclt_dst, //         [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports)
+						-1);
+				printf("\ntextures_gen AFTER DEBAER0 cam= %d, color = %d\n",threadIdx.y, 0);
+				debug_print_mclt(
+						(float *) shr.mclt_debayer[ccam][0], //         [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports)
+						-1);
+
+			}
+			__syncthreads();// __syncwarp();
 		}
 		__syncthreads();// __syncwarp();
 #endif
+	} // for (int color = 0; color < colors; color++)
+
+	__syncthreads(); // __syncwarp();
+///	return;
+#ifdef DEBUG77
+	if ((tile_num == DBG_TILE)  && (threadIdx.x == 0) && (threadIdx.y == 0)){
+		for (int ccam = 0; ccam < NUM_CAMS; ccam++) {
+			//		if ((tile_num == DBG_TILE)  && (threadIdx.x == 0) && (threadIdx.y == ccam)){
+			for (int nncol = 0; nncol < colors; nncol++){
+				printf("\ntextures_gen AFTER DEBAER1 cam= %d, color = %d\n",ccam, nncol);
+				//				float * mclt_dst =  (float *) shr.mclt_debayer[camera_num][color];
+				debug_print_mclt(
+						(float *) shr.mclt_debayer[ccam][nncol], //         [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports)
+						-1);
+			}
+		}
 	}
+	__syncthreads();// __syncwarp();
+#endif
 
+#ifdef DEBUG77
+	for (int ccam = 0; ccam < NUM_CAMS; ccam++) {
+		if ((tile_num == DBG_TILE)  && (threadIdx.x == 0) && (threadIdx.y == ccam)){
+			for (int nncol = 0; nncol < colors; nncol++){
+				printf("\ntextures_gen AFTER DEBAER1 cam= %d, color = %d\n",ccam, nncol);
+				//				float * mclt_dst =  (float *) shr.mclt_debayer[camera_num][color];
+				debug_print_mclt(
+						(float *) shr.mclt_debayer[ccam][nncol], //         [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports)
+						-1);
+			}
+		}
+		__syncthreads();// __syncwarp();
+	}
+	__syncthreads();// __syncwarp();
+#endif
 
+	tile_combine_rgba(
+			colors,                    // int     colors,        // number of colors
+			(float*) shr.mclt_debayer, // float * mclt_tile,     // debayer // has gaps to align with union !
+			(float *) shr1.rgbaw,      // float * rgba,          // result
+			(float * ) 0,              // float * ports_rgb,     // average values of R,G,B for each camera (R0,R1,...,B2,B3) // null
+			(float * ) 0,              // float * max_diff,      // maximal (weighted) deviation of each channel from the average /null
+			(float *) port_offsets,    // float * port_offsets,  // [port]{x_off, y_off} - just to scale pixel value differences
+			diff_sigma,                // float   diff_sigma,     // pixel value/pixel change
+			diff_threshold,            // float   diff_threshold, // pixel value/pixel change
+			min_agree,                 // float   min_agree,   NOT USED?   // minimal number of channels to agree on a point (real number to work with fuzzy averages)
+			weights,                   // float * chn_weights,       // color channel weights, sum == 1.0
+			dust_remove,               // int     dust_remove,       // Do not reduce average weight when only one image differes much from the average
+			dust_remove,               // int     keep_weights,   // return channel weights after A in RGBA - ALWAYS
+			(tile_num == DBG_TILE) );  //int     debug );
 
 #ifdef DEBUG7
-    if ((tile_num == DBG_TILE)  && (threadIdx.x == 0)){
+	if ((tile_num == DBG_TILE)  && (threadIdx.x == 0) && (threadIdx.y == 0)){
         printf("\ntextures_gen tile done = %d\n",tile_num);
     }
      __syncthreads();// __syncwarp();
@@ -2244,7 +2329,7 @@ __device__ void imclt8threads(
 	float * clt_tile2 = clt_tile1 + (DTT_SIZE1 * DTT_SIZE);
 	float * clt_tile3 = clt_tile2 + (DTT_SIZE1 * DTT_SIZE);
 #ifdef DEBUG7
-    if (debug &&(threadIdx.x == 0)){
+    if (debug && (threadIdx.x == 0) && (threadIdx.y == 0)){
         printf("\nDTT Tiles before IDTT\n");
         debug_print_clt_scaled(clt_tile, -1,  0xf, 0.25); // only 1 quadrant for R,B and 2 - for G
     }
@@ -2283,7 +2368,7 @@ __device__ void imclt8threads(
     __syncthreads();// __syncwarp();
 
 #ifdef DEBUG7
-    if (debug &&(threadIdx.x == 0)){
+    if (debug && (threadIdx.x == 0) && (threadIdx.y == 0)){
     	printf("\nDTT Tiles after IDTT\n");
     	debug_print_clt_scaled(clt_tile, -1,  0xf, 0.25); // only 1 quadrant for R,B and 2 - for G
     }
@@ -2301,7 +2386,7 @@ __device__ void imclt8threads(
     	int clt_offset = imclt_indx9[column]; // index in each of the 4 iclt quadrants, accounting for stride=9
     	float * rslt = mclt_tile + column;
 #ifdef DEBUG7
-    if (debug &&(threadIdx.x == 0)){
+        if (debug && (threadIdx.x == 0) && (threadIdx.y == 0)){
     	printf("\nUnrolling: thr3=%d, thr3m=%d, column=%d, thr012=%d, column4=%d, wcolumn=%d, hw=%f, clt_offset=%d\n",
     			thr3, thr3m, column, thr012, column4, wcolumn, hw, clt_offset);
     	debug_print_clt1(clt_tile, -1,  0xf); // only 1 quadrant for R,B and 2 - for G
@@ -2388,10 +2473,15 @@ __device__ void imclt8threads(
     }
 #ifdef DEBUG7
     __syncthreads();// __syncwarp();
-    if (debug &&(threadIdx.x == 0)){
-    	printf("\nMCLT Tiles after IMCLT\n");
-    	debug_print_mclt(mclt_tile, -1); // only 1 quadrant for R,B and 2 - for G
-    }
+	for (int ccam = 0; ccam < NUM_CAMS; ccam++) {
+		if (debug  && (threadIdx.x == 0) && (threadIdx.y == ccam)){
+			printf("\nMCLT Tiles after IMCLT, cam=%d\n", threadIdx.y);
+			debug_print_mclt(
+					mclt_tile, //         [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports)
+					-1);
+		}
+		__syncthreads();// __syncwarp();
+	}
     __syncthreads();// __syncwarp();
 #endif
 }
@@ -2426,11 +2516,14 @@ __device__ void debayer_shot(
 	__syncthreads();
 
 #ifdef DEBUG7
-	if (debug  && (threadIdx.x == 0)){
-		printf("\ndebayer_shot HWINDOW_SQi applied \n");
-		debug_print_mclt(
-				mclt_tmp, //         [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports)
-				-1);
+	for (int ccam = 0; ccam < NUM_CAMS; ccam++) {
+		if (debug  && (threadIdx.x == 0) && (threadIdx.y == ccam)){
+			printf("\ndebayer_shot HWINDOW_SQi applied, camera = %d\n",threadIdx.y);
+			debug_print_mclt(
+					mclt_tmp, //         [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports)
+					-1);
+		}
+		__syncthreads();// __syncwarp();
 	}
 	__syncthreads();// __syncwarp();
 #endif
@@ -2441,14 +2534,19 @@ __device__ void debayer_shot(
 			mclt_dst,  // [2* DTT_SIZE][DTT_SIZE1+ DTT_SIZE], // +1 to alternate column ports[16][17]
 			debug);
 #ifdef DEBUG7
-	if (debug  && (threadIdx.x == 0)){
-		printf("\ndebayer_shot debayer() applied \n");
-		debug_print_mclt(
-				mclt_dst, //         [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports)
-				-1);
+	for (int ccam = 0; ccam < NUM_CAMS; ccam++) {
+		if (debug  && (threadIdx.x == 0) && (threadIdx.y == ccam)){
+			printf("\ndebayer_shot debayer() applied, camera = %d\n",threadIdx.y);
+			debug_print_mclt(
+					mclt_dst, //         [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports)
+					-1);
+		}
+		__syncthreads();// __syncwarp();
 	}
 	__syncthreads();// __syncwarp();
 #endif
+
+
 	if (scale_shot > 0.0) {
 		float k = rsqrtf(min_shot);
 
@@ -2466,11 +2564,14 @@ __device__ void debayer_shot(
 			mcltp += (DTT_SIZE21-DTT_SIZE2);
 		}
 #ifdef DEBUG7
-		if (debug  && (threadIdx.x == 0)){
-			printf("\ndebayer_shot sqrt applied, scale_shot = %f, min_shot = %f, k= %f\n",scale_shot, min_shot, k);
-			debug_print_mclt(
-					mclt_dst, //         [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports)
-					-1);
+		for (int ccam = 0; ccam < NUM_CAMS; ccam++) {
+			if (debug  && (threadIdx.x == 0) && (threadIdx.y == ccam)){
+				printf("\ndebayer_shot sqrt applied, camera = %d, scale_shot = %f, min_shot = %f, k= %f\n",threadIdx.y, scale_shot, min_shot, k);
+				debug_print_mclt(
+						mclt_dst, //         [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports)
+						-1);
+			}
+			__syncthreads();// __syncwarp();
 		}
 		__syncthreads();// __syncwarp();
 #endif
@@ -2495,11 +2596,14 @@ __device__ void debayer_shot(
 	__syncthreads();
 
 #ifdef DEBUG7
-	if (debug  && (threadIdx.x == 0)){
-		printf("\ndebayer_shot HWINDOW2 applied \n");
-		debug_print_mclt(
-				mclt_dst, //         [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports)
-				-1);
+	for (int ccam = 0; ccam < NUM_CAMS; ccam++) {
+		if (debug  && (threadIdx.x == 0) && (threadIdx.y == ccam)){
+			printf("\ndebayer_shot HWINDOW2 applied, camera = %d \n",threadIdx.y);
+			debug_print_mclt(
+					mclt_dst, //         [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports)
+					-1);
+		}
+		__syncthreads();// __syncwarp();
 	}
 	__syncthreads();// __syncwarp();
 #endif
@@ -2565,7 +2669,460 @@ __device__ void debayer(
 }
 
 //DTT_SIZE21
+__device__ void tile_combine_rgba(
+		int     colors,        // number of colors
+		float * mclt_tile,     // debayer // has gaps to align with union !
+		float * rgba,          // result
+		float * ports_rgb,     // average values of R,G,B for each camera (R0,R1,...,B2,B3) // null
+		float * max_diff,      // maximal (weighted) deviation of each channel from the average /null
+		float * port_offsets,  // [port]{x_off, y_off} - just to scale pixel value differences
+		//		int           port_mask,      // which port to use, 0xf - all 4 (will modify as local variable)
+		float   diff_sigma,     // pixel value/pixel change
+		float   diff_threshold, // pixel value/pixel change
+		// next not used
+		//		boolean       diff_gauss,     // when averaging images, use gaussian around average as weight (false - sharp all/nothing)
+		float   min_agree,      // minimal number of channels to agree on a point (real number to work with fuzzy averages)
+		float * chn_weights,     // color channel weights, sum == 1.0
+		int     dust_remove,     // Do not reduce average weight when only one image differes much from the average
+		int     keep_weights,   // return channel weights after A in RGBA - ALWAYS
+		int     debug
+)
+{
+	float * alpha =        rgba + (colors * (DTT_SIZE2*DTT_SIZE21));
+	float * port_weights = alpha + (DTT_SIZE2*DTT_SIZE21);
+	float * crms =         port_weights + NUM_CAMS*(DTT_SIZE2*DTT_SIZE21); // results are never used?
+	float  threshold2 = diff_sigma * diff_threshold;
+	threshold2 *= threshold2; // squared to compare with diff^2
+	float  pair_dist2r [NUM_CAMS*(NUM_CAMS-1)/2]; // new double [ports*(ports-1)/2]; // reversed squared distance between images - to be used with gaussian. Can be calculated once !
+	int    pair_ports[NUM_CAMS*(NUM_CAMS-1)/2][2];  // int [][]  pair_ports = new int [ports*(ports-1)/2][2];
+	int    indx = 0;
+	float  ksigma = 1.0/(2.0*diff_sigma*diff_sigma); // multiply by a weighted sum of squares of the differences
+#ifdef DEBUG9
+	__shared__ int dbg_bestPort1 [DTT_SIZE2*DTT_SIZE21];
+	__shared__ int dbg_bestPort2 [DTT_SIZE2*DTT_SIZE21];
+#endif // #ifdef DEBUG9
 
+#pragma unroll
+	for (int i = 0; i < NUM_CAMS; i++) { // if ((port_mask & ( 1 << i)) != 0){
+#pragma unroll
+		for (int j = i+1; j < NUM_CAMS; j++) { //   if ((port_mask & ( 1 << j)) != 0){
+			//				double dx = port_offsets[j][0] - port_offsets[i][0];
+			//				double dy = port_offsets[j][1] - port_offsets[i][1];
+			float dx = *(port_offsets + 2 * j) -     *(port_offsets + 2 * i);
+			float dy = *(port_offsets + 2 * j + 1) - *(port_offsets + 2 * i + 1);
+			pair_ports[indx][0] = i;
+			pair_ports[indx][1] = j;
+			pair_dist2r[indx++] = ksigma / (dx*dx+dy*dy); // 2*sigma^2 * r^2
+		}
+	}
+	int colors_offset = colors * MCLT_UNION_LEN; // padded in union !
+
+#ifdef DEBUG8
+	__syncthreads();// __syncwarp();
+	if (debug  && (threadIdx.x == 0) && (threadIdx.y == 0)){
+		printf("\ntile_combine_rgba ksigma = %f\n",ksigma);
+		for (int i = 0; i < indx; i++) {
+			printf("%02d: %d :%d %f\n",i,pair_ports[i][0], pair_ports[i][1], pair_dist2r[i]);
+		}
+	}
+	__syncthreads();// __syncwarp();
+	if (debug  && (threadIdx.x == 0) && (threadIdx.y == 0)){
+		for (int ccam = 0; ccam < NUM_CAMS; ccam++) { // if ((port_mask & ( 1 << i)) != 0){
+			for (int nncol = 0; nncol < colors; nncol++){
+				printf("\ntile_combine_rgba cam = %d, color = %d\n",ccam, nncol);
+				debug_print_mclt(
+						mclt_tile + ((nncol + colors * ccam) * MCLT_UNION_LEN),
+						-1);
+			}
+		}
+		printf("\ntile_combine_rgba break 1\n");
+	}
+	__syncthreads();// __syncwarp();
+
+#endif
+
+	for (int pass = 0; pass < 8; pass ++) {
+		// below non-parametrized !
+		int row = pass * 2 + (threadIdx.y >> 1);
+		int col = ((threadIdx.y & 1) << 3) + threadIdx.x;
+		int i = row * DTT_SIZE21 + col;
+		float * crms_i = crms+i;
+		float * port_weights_i = port_weights + i;
+		float * mclt_tile_i = mclt_tile +  i; // has gaps to align in a union !
+		float * alpha_i = alpha + i;
+		if (keep_weights){
+			float sw = 0.0;
+			for (int ncol = 0; ncol < colors; ncol ++ ) { //  if (iclt_tile[0][ncol] != null){
+				float s0 = 0, s1 = 0, s2 = 0;
+				float * crms_col_i = crms_i + (DTT_SIZE2*DTT_SIZE21) * ncol;
+				float * mclt_col_i = mclt_tile_i + MCLT_UNION_LEN * ncol;
+				for (int cam = 0; cam < NUM_CAMS; cam++) { // if ((port_mask & ( 1 << ip)) != 0){
+					s0 += 1.0;
+					float d = * (mclt_col_i + colors_offset * cam);
+					s1 += d;
+					s2 += d * d;
+				}
+				float mse = (s0*s2 - s1*s1) / (s0 * s0);
+				* crms_col_i = sqrtf(mse);
+				sw += *(chn_weights +ncol) * mse;
+			}
+			*(crms_i + (DTT_SIZE2*DTT_SIZE21) * colors) = sqrtf(sw); // will fade as window
+		}
+#ifdef DEBUG9
+	}
+
+#ifdef DEBUG8
+	if (debug  && (threadIdx.x == 0) && (threadIdx.y == 0)){
+		for (int ncol = 0; ncol < colors; ncol++) {
+			printf("\n+++++ crms[%d] +++++\n",ncol);
+			debug_print_mclt(
+					crms + (ncol * (DTT_SIZE2*DTT_SIZE21)),
+					-1);
+		}
+		printf("\n+++++ cmrs_combo +++++\n");
+		debug_print_mclt(
+				crms + (colors * (DTT_SIZE2*DTT_SIZE21)), //
+				-1);
+	}
+	__syncthreads();// __syncwarp();
+#endif
+	__syncthreads();// __syncwarp();
+	for (int pass = 0; pass < 8; pass ++) {
+		// below non-parametrized !
+		int row = pass * 2 + (threadIdx.y >> 1);
+		int col = ((threadIdx.y & 1) << 3) + threadIdx.x;
+		int i = row * DTT_SIZE21 + col;
+		float * crms_i = crms+i;
+		float * port_weights_i = port_weights + i;
+		float * mclt_tile_i = mclt_tile +  i; // has gaps to align in a union !
+		float * alpha_i = alpha + i;
+#endif // #ifdef DEBUG9
+
+		for (int cam = 0; cam < NUM_CAMS; cam++) {
+			*(port_weights_i + cam*(DTT_SIZE2*DTT_SIZE21)) = 0.0;
+		}
+		int row_sym = row ^ ((row & 8)? 0xf : 0);
+		int col_sym = col ^ ((col & 8)? 0xf : 0);
+		float wnd2 = HWINDOW_SQ[row_sym] * HWINDOW_SQ[col_sym];
+		float wnd2_inv = 1.0/wnd2;
+
+#pragma unroll
+		for (int ipair = 0; ipair < (NUM_CAMS*(NUM_CAMS-1)/2); ipair++){
+			float d = 0;
+#pragma unroll
+			for (int ncol = 0; ncol < colors; ncol++) { // if (iclt_tile[0][ncol] != null){
+				//					double dc = iclt_tile[pair_ports[ip][0]][ncol][i] - iclt_tile[pair_ports[ip][1]][ncol][i];
+				float * mclt_col_i = mclt_tile_i + MCLT_UNION_LEN * ncol;
+				float dc =
+						*(mclt_col_i + colors_offset * pair_ports[ipair][0]) -
+						*(mclt_col_i + colors_offset * pair_ports[ipair][1]);
+				dc *= wnd2_inv; // to compensate fading near the edges
+				d+= *(chn_weights + ncol) * dc * dc;
+			}
+			d = expf(-pair_dist2r[ipair] * d); // 0.5 for exact match, lower for mismatch. Add this weight to both ports involved
+			// Add weight to both channels in a pair
+			*(port_weights_i + (DTT_SIZE2*DTT_SIZE21) * pair_ports[ipair][0]) +=d;
+			*(port_weights_i + (DTT_SIZE2*DTT_SIZE21) * pair_ports[ipair][1]) +=d;
+		}
+		// find 2 best ports (resolving 2 pairs of close values)
+		int bestPort1 = 0;
+		float best_val= *port_weights_i;
+#pragma unroll
+		for (int cam = bestPort1 + 1; cam < NUM_CAMS; cam++) {
+			float val = *(port_weights_i + cam * (DTT_SIZE2*DTT_SIZE21));
+			if (val > best_val){
+				bestPort1 = cam;
+				best_val =  val;
+			}
+		}
+		int bestPort2 = (bestPort1 == 0) ? 1 : 0;
+		best_val= *(port_weights_i + bestPort2 * (DTT_SIZE2*DTT_SIZE21));
+#pragma unroll
+		for (int cam = bestPort2 + 1; cam < NUM_CAMS; cam++){
+			float val = *(port_weights_i + cam * (DTT_SIZE2*DTT_SIZE21));
+			if ((cam != bestPort1) && (val > best_val)){
+				bestPort2 = cam;
+				best_val =  val;
+			}
+		}
+#ifdef DEBUG9
+		dbg_bestPort1[i] = bestPort1;
+		dbg_bestPort2[i] = bestPort2;
+#endif // #ifdef DEBUG9
+
+		// find weighted average between these 2 ports
+		float pw1 = *(port_weights_i + bestPort1 * (DTT_SIZE2*DTT_SIZE21));
+		float w1 = pw1/(pw1 + *(port_weights_i + bestPort2 * (DTT_SIZE2*DTT_SIZE21)));
+		float w2 = 1.0 - w1;
+		float * rgba_i = rgba + i;
+#pragma unroll
+		for (int ncol = 0; ncol < colors; ncol++) { // if (iclt_tile[0][ncol] != null) {
+			float * mclt_col_i = mclt_tile_i + MCLT_UNION_LEN * ncol;
+			* (rgba_i + ncol * (DTT_SIZE2*DTT_SIZE21))=
+					w1 *  *(mclt_col_i + colors_offset * bestPort1) +
+					w2 *  *(mclt_col_i + colors_offset * bestPort2);
+		}
+
+
+#ifdef DEBUG9
+	}
+
+#ifdef DEBUG8
+	if (debug  && (threadIdx.x == 0) && (threadIdx.y == 0)){
+		for (int ccam = 0; ccam < NUM_CAMS; ccam++) {
+			printf("\n===== port_weight[%d] ====\n",ccam);
+			debug_print_mclt(
+					port_weights + (ccam * (DTT_SIZE2*DTT_SIZE21)),
+					-1);
+		}
+		printf("\n+++++ best ports +++++\n");
+		for (int dbg_row = 0; dbg_row < DTT_SIZE2; dbg_row++){
+			for (int dbg_col = 0; dbg_col < DTT_SIZE2; dbg_col++){
+				printf ("%1d[%1d] ",dbg_bestPort1[dbg_row *DTT_SIZE21 + dbg_col],dbg_bestPort2[dbg_row *DTT_SIZE21 + dbg_col]);
+			}
+			printf("\n");
+		}
+		printf("\n");
+		for (int ncol = 0; ncol < colors; ncol++) {
+			printf("\n+++++ rgba[%d] +++++\n",ncol);
+			debug_print_mclt(
+					rgba + (ncol * (DTT_SIZE2*DTT_SIZE21)),
+					-1);
+		}
+	}
+	__syncthreads();// __syncwarp();
+#endif
+
+	__syncthreads();// __syncwarp();
+	for (int pass = 0; pass < 8; pass ++) {
+		// below non-parametrized !
+		int row = pass * 2 + (threadIdx.y >> 1);
+		int col = ((threadIdx.y & 1) << 3) + threadIdx.x;
+		int i = row * DTT_SIZE21 + col;
+		float * crms_i = crms+i;
+		float * port_weights_i = port_weights + i;
+		float * mclt_tile_i = mclt_tile +  i; // has gaps to align in a union !
+		float * alpha_i = alpha + i;
+		float * rgba_i = rgba + i;
+		int row_sym = row ^ ((row & 8)? 0xf : 0);
+		int col_sym = col ^ ((col & 8)? 0xf : 0);
+		float wnd2 = HWINDOW_SQ[row_sym] * HWINDOW_SQ[col_sym];
+		float wnd2_inv = 1.0/wnd2;
+
+#endif // #ifdef DEBUG9
+
+		// recalculate all weights using difference from this average of the best pair
+		for (int cam = 0; cam < NUM_CAMS; cam++) { // if ((port_mask & ( 1 << ip)) != 0){
+			float * mclt_cam_i = mclt_tile_i + cam * colors_offset;
+			float d2_ip = 0;
+			for (int ncol = 0; ncol < colors; ncol++) { //  if (iclt_tile[0][ncol] != null){
+				float * mclt_cam_col_i = mclt_cam_i + MCLT_UNION_LEN * ncol; // DTT_SIZE2*DTT_SIZE21 * ncol;
+				float dc = *(mclt_cam_col_i) - * (rgba_i + ncol * (DTT_SIZE2*DTT_SIZE21));
+				dc    *= wnd2_inv; // /= lt_window[i]; // to compensate fading near the edges
+				d2_ip += *(chn_weights + ncol) * dc * dc;
+			}
+			// TODO: Should it use pair_dist2r ? no as it is relative?
+			//				port_weights[ip][i] = Math.exp(-ksigma * d2[ip]);
+			*(port_weights_i + (DTT_SIZE2*DTT_SIZE21) * cam) = expf(-ksigma * d2_ip);
+		}
+		// and now make a new average with those weights
+		// Inserting dust remove here
+		if (dust_remove) {
+			int worstPort = 0;
+			float worst_val= *port_weights_i;
+#pragma unroll
+			for (int cam = 1; cam < NUM_CAMS; cam++) {
+				float val = *(port_weights_i + cam * (DTT_SIZE2*DTT_SIZE21));
+				if (val < worst_val){
+					worstPort = cam;
+					worst_val = val;
+				}
+			}
+			float avg = -worst_val; // avoid conditional
+#pragma unroll
+			for (int cam = 0; cam < NUM_CAMS; cam++){
+					avg += *(port_weights_i + cam * (DTT_SIZE2*DTT_SIZE21));
+			}
+			avg /= (NUM_CAMS -1);
+			float scale = 1.0 + worst_val * (avg - worst_val)/(avg * avg * (NUM_CAMS-1));
+			for (int cam = 0; cam < NUM_CAMS; cam++){
+				if (cam != worstPort){
+					*(port_weights_i + cam * (DTT_SIZE2*DTT_SIZE21)) *= scale;
+				}
+			}
+			*(port_weights_i + worstPort * (DTT_SIZE2*DTT_SIZE21)) *= worst_val/avg;
+		}
+
+
+#ifdef DEBUG9
+	}
+
+#ifdef DEBUG8
+	if (debug  && (threadIdx.x == 0) && (threadIdx.y == 0)){
+		for (int ccam = 0; ccam < NUM_CAMS; ccam++) {
+			printf("\n===== UPDATED port_weight[%d] after dust_remove ====\n",ccam);
+			debug_print_mclt(
+					port_weights + (ccam * (DTT_SIZE2*DTT_SIZE21)),
+					-1);
+		}
+	}
+	__syncthreads();// __syncwarp();
+#endif
+
+	__syncthreads();// __syncwarp();
+	for (int pass = 0; pass < 8; pass ++) {
+		// below non-parametrized !
+		int row = pass * 2 + (threadIdx.y >> 1);
+		int col = ((threadIdx.y & 1) << 3) + threadIdx.x;
+		int i = row * DTT_SIZE21 + col;
+		float * crms_i = crms+i;
+		float * port_weights_i = port_weights + i;
+		float * mclt_tile_i = mclt_tile +  i; // has gaps to align in a union !
+		float * alpha_i = alpha + i;
+		float * rgba_i = rgba + i;
+		int row_sym = row ^ ((row & 8)? 0xf : 0);
+		int col_sym = col ^ ((col & 8)? 0xf : 0);
+		float wnd2 = HWINDOW_SQ[row_sym] * HWINDOW_SQ[col_sym];
+		float wnd2_inv = 1.0/wnd2;
+
+#endif // #ifdef DEBUG9
+
+
+
+
+
+		///
+		float k = 0.0;
+#pragma unroll
+		for (int cam = 0; cam < NUM_CAMS; cam++){
+			k += *(port_weights_i + (DTT_SIZE2*DTT_SIZE21) * cam); // port_weights[ip][i];
+		}
+		k = 1.0/k;
+#pragma unroll
+		for (int ncol = 0; ncol < colors; ncol++) { // if (iclt_tile[0][ncol] != null) {
+			float * rgba_col_i = rgba_i + ncol * (DTT_SIZE2*DTT_SIZE21);
+			float * mclt_col_i = mclt_tile_i + MCLT_UNION_LEN * ncol;
+			*rgba_col_i = 0.0; // color_avg[ncol][i] = 0;
+#pragma unroll
+			for (int cam = 0; cam < NUM_CAMS; cam++) {
+				*rgba_col_i += k * *(port_weights_i + (DTT_SIZE2*DTT_SIZE21) * cam) * *(mclt_col_i + cam * colors_offset);
+			}
+		}
+		// calculate alpha from channel weights. Start with just a sum of weights?
+//		int used_ports = NUM_CAMS;
+//		if (dust_remove){
+//			used_ports--;
+//		}
+		float a = 0;
+
+#pragma unroll
+		for (int cam = 0; cam < NUM_CAMS; cam++) {
+			a +=  *(port_weights_i + (DTT_SIZE2*DTT_SIZE21) * cam);
+		}
+		*alpha_i = wnd2 * a / NUM_CAMS; // used_ports;
+	}// for (int pass = 0; pass < 8; pass ++)
+	__syncthreads();
+
+#ifdef DEBUG8
+	if (debug  && (threadIdx.x == 0) && (threadIdx.y == 0)){
+		printf("\ntile_combine_rgba() final\n");
+		for (int ncol = 0; ncol < colors; ncol++) {
+			printf("\ntile_combine_rgba() rgba[%d]\n",ncol);
+			debug_print_mclt(
+					rgba + (ncol * (DTT_SIZE2*DTT_SIZE21)),
+					-1);
+		}
+		printf("\ntile_combine_rgba() alpha\n");
+		debug_print_mclt(
+				alpha, //
+				-1);
+		for (int cam = 0; cam < colors; cam++) {
+			printf("\ntile_combine_rgba() port_weights[%d]\n",cam);
+			debug_print_mclt(
+					port_weights + (cam * (DTT_SIZE2*DTT_SIZE21)),
+					-1);
+		}
+		for (int ncol = 0; ncol < (colors + 1); ncol++) {
+			printf("\ntile_combine_rgba() crms[%d]\n",ncol);
+			debug_print_mclt(
+					crms + (ncol * (DTT_SIZE2*DTT_SIZE21)),
+					-1);
+		}
+	}
+		__syncthreads();// __syncwarp();
+#endif
+
+
+
+	if (max_diff){
+		__shared__ float max_diff_tmp [NUM_CAMS][TEXTURE_THREADS_PER_TILE]; // [4][8]
+		int cam = threadIdx.y;
+		max_diff_tmp[cam][threadIdx.x] = 0.0;
+#pragma unroll
+		for (int pass = 0; pass < 32; pass++){
+			int row = (pass >> 1);
+			int col = ((pass & 1) << 3) + threadIdx.x;
+			int i = row * DTT_SIZE21 + col;
+			int row_sym = row ^ ((row & 8)? 0xf : 0);
+			int col_sym = col ^ ((col & 8)? 0xf : 0);
+			float wnd2 = HWINDOW_SQ[row_sym] * HWINDOW_SQi[col_sym];
+//			float * port_weights_i = port_weights + i;
+			float * mclt_cam_i = mclt_tile +  colors_offset * cam + i;
+			float d2 = 0.0;
+#pragma unroll
+			for (int ncol = 0; ncol < colors; ncol++){
+				float dc = *(mclt_cam_i + (DTT_SIZE2*DTT_SIZE21) * ncol) - *(rgba + (DTT_SIZE2*DTT_SIZE21) * ncol + i);
+				d2 += *(chn_weights + ncol) * dc * dc;
+			}
+			d2 *= wnd2;
+			max_diff_tmp[cam][threadIdx.x] = fmaxf(max_diff_tmp[cam][threadIdx.x], d2);
+		}
+		__syncthreads();
+		if (threadIdx.x == 0){ // combine results
+			float mx = 0.0;
+#pragma unroll
+			for (int i = 0; i < TEXTURE_THREADS_PER_TILE; i++){
+				mx = fmaxf(mx, max_diff_tmp[cam][i]);
+			}
+			max_diff[cam] = sqrtf(mx);
+		}
+	}
+
+	if (ports_rgb) {
+		__shared__ float ports_rgb_tmp [NUM_CAMS][NUM_COLORS][TEXTURE_THREADS_PER_TILE]; // [4*3][8]
+		int cam = threadIdx.y;
+#pragma unroll
+		for (int ncol = 0; ncol < colors; ncol++){
+			ports_rgb_tmp[cam][ncol][threadIdx.x] = 0.0;
+		}
+
+#pragma unroll
+		for (int pass = 0; pass < 32; pass++){
+			int row = (pass >> 1);
+			int col = ((pass & 1) << 3) + threadIdx.x;
+			int i = row * DTT_SIZE21 + col;
+//			int row_sym = row ^ ((row & 8)? 0xf : 0);
+			float * mclt_cam_i = mclt_tile +  colors_offset * cam + i;
+#pragma unroll
+			for (int ncol = 0; ncol < colors; ncol++){
+				ports_rgb_tmp[cam][ncol][threadIdx.x] += *(mclt_cam_i + (DTT_SIZE2*DTT_SIZE21) * ncol);
+			}
+		}
+		__syncthreads();
+		if (threadIdx.x == 0){ // combine results
+#pragma unroll
+			for (int ncol = 0; ncol < colors; ncol++){
+				ports_rgb[ncol * NUM_CAMS + cam] = 0;
+#pragma unroll
+				for (int i = 0; i < TEXTURE_THREADS_PER_TILE; i++){
+					int indx = ncol * NUM_CAMS + cam;
+					ports_rgb[indx] += ports_rgb_tmp[cam][ncol][i];
+				}
+				ports_rgb[indx] /= DTT_SIZE2*DTT_SIZE2; // correct for window?
+			}
+		}
+	}
+}
 
 
 

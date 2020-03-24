@@ -740,7 +740,7 @@ int main(int argc, char **argv)
 #ifndef NOTEXTURES
 //    cudaProfilerStart();
     // testing textures
-    dim3 threads_texture(TEXTURE_THREADS_PER_TILE, TEXTURE_TILES_PER_BLOCK, 1);
+    dim3 threads_texture(TEXTURE_THREADS_PER_TILE, NUM_CAMS, 1); // TEXTURE_TILES_PER_BLOCK, 1);
     dim3 grid_texture((num_textures + TEXTURE_TILES_PER_BLOCK-1) / TEXTURE_TILES_PER_BLOCK,1,1);
     printf("threads_texture=(%d, %d, %d)\n",threads_texture.x,threads_texture.y,threads_texture.z);
     printf("grid_texture=(%d, %d, %d)\n",grid_texture.x,grid_texture.y,grid_texture.z);
@@ -773,11 +773,11 @@ int main(int argc, char **argv)
 		10.0f,                 // float             diff_threshold,     // pixel value/pixel change
 //		int               diff_gauss,         // when averaging images, use gaussian around average as weight (false - sharp all/nothing)
 		3.0,                   // float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
-		0.294118,                  // float             weight0,            // scale for R
-		0.117647,                  // float             weight1,            // scale for B
-		0.588235,                   // float             weight2,            // scale for G
-		1.0,                   // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
-//		1.0,                   // int               keep_weights,       // return channel weights after A in RGBA
+		0.294118,              // float             weight0,            // scale for R
+		0.117647,              // float             weight1,            // scale for B
+		0.588235,              // float             weight2,            // scale for G
+		1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
+		1,                     // int               keep_weights,       // return channel weights after A in RGBA
 		dstride_textures/sizeof(float), // const size_t      texture_stride,     // in floats (now 256*4 = 1024)
 		gpu_textures);    // float           * gpu_texture_tiles);  // 4*16*16 rgba texture tiles
 
