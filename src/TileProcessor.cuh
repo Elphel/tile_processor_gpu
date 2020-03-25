@@ -768,7 +768,6 @@ Java code:
 #endif
 #endif
 
-// searching for bug. Uncomment later
     // copy 15x15 tile to main memory (2 * corr_radius +1) x (2 * corr_radius +1)
  	int size2r1 = 2 * corr_radius + 1;
  	int len2r1x2r1 = size2r1 * size2r1;
@@ -893,7 +892,7 @@ __global__ void textures_gen(
 		int               dust_remove,        // Do not reduce average weight when only one image differs much from the average
 		int               keep_weights,       // return channel weights after A in RGBA (was removed)
 		const size_t      texture_stride,     // in floats (now 256*4 = 1024)
-		float           * gpu_texture_tiles)  // (number of colors +1)*16*16 rgba texture tiles
+		float           * gpu_texture_tiles)  // (number of colors +1 + ?)*16*16 rgba texture tiles
 {
 	float weights[3] = {weight0, weight1, weight2};
 	// will process exactly 4 cameras in one block (so this number is not adjustable here NUM_CAMS should be == 4 !
@@ -912,7 +911,7 @@ __global__ void textures_gen(
 	} shr;
 	__shared__ union {
 		float mclt_tmp           [NUM_CAMS][NUM_COLORS][DTT_SIZE2][DTT_SIZE21];
-		float rgbaw              [NUM_COLORS+1 + NUM_CAMS + NUM_COLORS+1][DTT_SIZE2][DTT_SIZE21];
+		float rgbaw              [NUM_COLORS + 1 + NUM_CAMS + NUM_COLORS + 1][DTT_SIZE2][DTT_SIZE21];
 		// add more
 	} shr1;
 	//	__shared__ float port_weights[NUM_CAMS][DTT_SIZE2 * DTT_SIZE21];
@@ -1067,14 +1066,54 @@ __global__ void textures_gen(
 			diff_sigma,                // float   diff_sigma,     // pixel value/pixel change
 			diff_threshold,            // float   diff_threshold, // pixel value/pixel change
 			min_agree,                 // float   min_agree,   NOT USED?   // minimal number of channels to agree on a point (real number to work with fuzzy averages)
-			weights,                   // float * chn_weights,       // color channel weights, sum == 1.0
-			dust_remove,               // int     dust_remove,       // Do not reduce average weight when only one image differes much from the average
-			dust_remove,               // int     keep_weights,   // return channel weights after A in RGBA - ALWAYS
+			weights,                   // float * chn_weights,    // color channel weights, sum == 1.0
+			dust_remove,               // int     dust_remove,    // Do not reduce average weight when only one image differes much from the average
+			keep_weights,              // int     keep_weights,   // return channel weights and rms after A in RGBA (weight are always calculated)
 			(tile_num == DBG_TILE) );  //int     debug );
+
+// return either only 4 slices (RBGA) or all 12 (with weights and rms) if keep_weights
+// float rgbaw              [NUM_COLORS + 1 + NUM_CAMS + NUM_COLORS + 1][DTT_SIZE2][DTT_SIZE21];
+//	size_t texture_tile_offset = + tile_indx * texture_stride;
+	float * gpu_texture_tile = gpu_texture_tiles + tile_indx * texture_stride;
+
+	for (int pass = 0; pass < 8; pass ++) {
+		int row = pass * 2 + (threadIdx.y >> 1);
+		int col = ((threadIdx.y & 1) << 3) + threadIdx.x;
+		int i  = row * DTT_SIZE21 + col;
+		int gi = row * DTT_SIZE2  + col;
+		float * gpu_texture_tile_gi = gpu_texture_tile + gi;
+		float * rgba_i = ((float *) shr1.rgbaw) + i;
+		// always copy 3 (1) colors + alpha
+		if (colors == 3){
+			if (keep_weights) {
+#pragma unroll
+				for (int ncol = 0; ncol < NUM_COLORS + 1 + NUM_CAMS + NUM_COLORS + 1 ; ncol++) { // 12
+					*(gpu_texture_tile_gi + ncol * (DTT_SIZE2 * DTT_SIZE2)) = *(rgba_i + ncol * (DTT_SIZE2 * DTT_SIZE21));
+				}
+			} else {
+#pragma unroll
+				for (int ncol = 0; ncol < NUM_COLORS + 1; ncol++) { // 4
+					*(gpu_texture_tile_gi + ncol * (DTT_SIZE2 * DTT_SIZE2)) = *(rgba_i + ncol * (DTT_SIZE2 * DTT_SIZE21));
+				}
+			}
+		} else { // assuming colors = 1
+			if (keep_weights) {
+#pragma unroll
+				for (int ncol = 0; ncol < 1 + 1 + NUM_CAMS + 1 + 1 ; ncol++) { // 8
+					*(gpu_texture_tile_gi + ncol * (DTT_SIZE2 * DTT_SIZE2)) = *(rgba_i + ncol * (DTT_SIZE2 * DTT_SIZE21));
+				}
+			} else {
+#pragma unroll
+				for (int ncol = 0; ncol < 1 + 1; ncol++) { // 2
+					*(gpu_texture_tile_gi + ncol * (DTT_SIZE2 * DTT_SIZE2)) = *(rgba_i + ncol * (DTT_SIZE2 * DTT_SIZE21));
+				}
+			}
+		}
+	}
 
 #ifdef DEBUG7
 	if ((tile_num == DBG_TILE)  && (threadIdx.x == 0) && (threadIdx.y == 0)){
-        printf("\ntextures_gen tile done = %d\n",tile_num);
+        printf("\ntextures_gen tile done = %d, texture_stride= %d\n",tile_num, (int) texture_stride);
     }
      __syncthreads();// __syncwarp();
 #endif
@@ -2684,13 +2723,13 @@ __device__ void tile_combine_rgba(
 		float   min_agree,      // minimal number of channels to agree on a point (real number to work with fuzzy averages)
 		float * chn_weights,     // color channel weights, sum == 1.0
 		int     dust_remove,     // Do not reduce average weight when only one image differes much from the average
-		int     keep_weights,   // return channel weights after A in RGBA - ALWAYS
+		int     keep_weights,   // eturn channel weights and rms after A in RGBA (weight are always calculated, not so for the crms)
 		int     debug
 )
 {
 	float * alpha =        rgba + (colors * (DTT_SIZE2*DTT_SIZE21));
 	float * port_weights = alpha + (DTT_SIZE2*DTT_SIZE21);
-	float * crms =         port_weights + NUM_CAMS*(DTT_SIZE2*DTT_SIZE21); // results are never used?
+	float * crms =         port_weights + NUM_CAMS*(DTT_SIZE2*DTT_SIZE21); // calculated only if keep_weights
 	float  threshold2 = diff_sigma * diff_threshold;
 	threshold2 *= threshold2; // squared to compare with diff^2
 	float  pair_dist2r [NUM_CAMS*(NUM_CAMS-1)/2]; // new double [ports*(ports-1)/2]; // reversed squared distance between images - to be used with gaussian. Can be calculated once !
@@ -2809,7 +2848,7 @@ __device__ void tile_combine_rgba(
 #pragma unroll
 		for (int ipair = 0; ipair < (NUM_CAMS*(NUM_CAMS-1)/2); ipair++){
 			float d = 0;
-#pragma unroll
+#pragma unroll // non-constant
 			for (int ncol = 0; ncol < colors; ncol++) { // if (iclt_tile[0][ncol] != null){
 				//					double dc = iclt_tile[pair_ports[ip][0]][ncol][i] - iclt_tile[pair_ports[ip][1]][ncol][i];
 				float * mclt_col_i = mclt_tile_i + MCLT_UNION_LEN * ncol;
@@ -2828,7 +2867,7 @@ __device__ void tile_combine_rgba(
 		int bestPort1 = 0;
 		float best_val= *port_weights_i;
 #pragma unroll
-		for (int cam = bestPort1 + 1; cam < NUM_CAMS; cam++) {
+		for (int cam = 1; cam < NUM_CAMS; cam++) {
 			float val = *(port_weights_i + cam * (DTT_SIZE2*DTT_SIZE21));
 			if (val > best_val){
 				bestPort1 = cam;
@@ -2837,7 +2876,7 @@ __device__ void tile_combine_rgba(
 		}
 		int bestPort2 = (bestPort1 == 0) ? 1 : 0;
 		best_val= *(port_weights_i + bestPort2 * (DTT_SIZE2*DTT_SIZE21));
-#pragma unroll
+#pragma unroll  // non-constant
 		for (int cam = bestPort2 + 1; cam < NUM_CAMS; cam++){
 			float val = *(port_weights_i + cam * (DTT_SIZE2*DTT_SIZE21));
 			if ((cam != bestPort1) && (val > best_val)){
@@ -2855,7 +2894,7 @@ __device__ void tile_combine_rgba(
 		float w1 = pw1/(pw1 + *(port_weights_i + bestPort2 * (DTT_SIZE2*DTT_SIZE21)));
 		float w2 = 1.0 - w1;
 		float * rgba_i = rgba + i;
-#pragma unroll
+#pragma unroll  // non-constant
 		for (int ncol = 0; ncol < colors; ncol++) { // if (iclt_tile[0][ncol] != null) {
 			float * mclt_col_i = mclt_tile_i + MCLT_UNION_LEN * ncol;
 			* (rgba_i + ncol * (DTT_SIZE2*DTT_SIZE21))=
@@ -2912,9 +2951,11 @@ __device__ void tile_combine_rgba(
 #endif // #ifdef DEBUG9
 
 		// recalculate all weights using difference from this average of the best pair
+#pragma unroll
 		for (int cam = 0; cam < NUM_CAMS; cam++) { // if ((port_mask & ( 1 << ip)) != 0){
 			float * mclt_cam_i = mclt_tile_i + cam * colors_offset;
 			float d2_ip = 0;
+#pragma unroll  // non-constant
 			for (int ncol = 0; ncol < colors; ncol++) { //  if (iclt_tile[0][ncol] != null){
 				float * mclt_cam_col_i = mclt_cam_i + MCLT_UNION_LEN * ncol; // DTT_SIZE2*DTT_SIZE21 * ncol;
 				float dc = *(mclt_cam_col_i) - * (rgba_i + ncol * (DTT_SIZE2*DTT_SIZE21));
@@ -2998,7 +3039,7 @@ __device__ void tile_combine_rgba(
 			k += *(port_weights_i + (DTT_SIZE2*DTT_SIZE21) * cam); // port_weights[ip][i];
 		}
 		k = 1.0/k;
-#pragma unroll
+#pragma unroll  // non-constant
 		for (int ncol = 0; ncol < colors; ncol++) { // if (iclt_tile[0][ncol] != null) {
 			float * rgba_col_i = rgba_i + ncol * (DTT_SIZE2*DTT_SIZE21);
 			float * mclt_col_i = mclt_tile_i + MCLT_UNION_LEN * ncol;
@@ -3036,7 +3077,7 @@ __device__ void tile_combine_rgba(
 		debug_print_mclt(
 				alpha, //
 				-1);
-		for (int cam = 0; cam < colors; cam++) {
+		for (int cam = 0; cam < NUM_CAMS; cam++) {
 			printf("\ntile_combine_rgba() port_weights[%d]\n",cam);
 			debug_print_mclt(
 					port_weights + (cam * (DTT_SIZE2*DTT_SIZE21)),
@@ -3066,10 +3107,9 @@ __device__ void tile_combine_rgba(
 			int row_sym = row ^ ((row & 8)? 0xf : 0);
 			int col_sym = col ^ ((col & 8)? 0xf : 0);
 			float wnd2 = HWINDOW_SQ[row_sym] * HWINDOW_SQi[col_sym];
-//			float * port_weights_i = port_weights + i;
 			float * mclt_cam_i = mclt_tile +  colors_offset * cam + i;
 			float d2 = 0.0;
-#pragma unroll
+#pragma unroll  // non-constant
 			for (int ncol = 0; ncol < colors; ncol++){
 				float dc = *(mclt_cam_i + (DTT_SIZE2*DTT_SIZE21) * ncol) - *(rgba + (DTT_SIZE2*DTT_SIZE21) * ncol + i);
 				d2 += *(chn_weights + ncol) * dc * dc;
@@ -3091,7 +3131,7 @@ __device__ void tile_combine_rgba(
 	if (ports_rgb) {
 		__shared__ float ports_rgb_tmp [NUM_CAMS][NUM_COLORS][TEXTURE_THREADS_PER_TILE]; // [4*3][8]
 		int cam = threadIdx.y;
-#pragma unroll
+#pragma unroll  // non-constant
 		for (int ncol = 0; ncol < colors; ncol++){
 			ports_rgb_tmp[cam][ncol][threadIdx.x] = 0.0;
 		}
@@ -3103,14 +3143,14 @@ __device__ void tile_combine_rgba(
 			int i = row * DTT_SIZE21 + col;
 //			int row_sym = row ^ ((row & 8)? 0xf : 0);
 			float * mclt_cam_i = mclt_tile +  colors_offset * cam + i;
-#pragma unroll
+#pragma unroll  // non-constant
 			for (int ncol = 0; ncol < colors; ncol++){
 				ports_rgb_tmp[cam][ncol][threadIdx.x] += *(mclt_cam_i + (DTT_SIZE2*DTT_SIZE21) * ncol);
 			}
 		}
 		__syncthreads();
 		if (threadIdx.x == 0){ // combine results
-#pragma unroll
+#pragma unroll  // non-constant
 			for (int ncol = 0; ncol < colors; ncol++){
 				ports_rgb[ncol * NUM_CAMS + cam] = 0;
 #pragma unroll

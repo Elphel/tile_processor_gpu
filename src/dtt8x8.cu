@@ -103,7 +103,7 @@ float ** copyalloc_pointers_gpu(float ** gpu_pointer,
 
 
 float * copyalloc_image_gpu(float * image_host,
-						size_t* dstride, // in bytes!!
+						size_t* dstride, // in floats !
 		                int width,
 						int height)
 {
@@ -257,6 +257,8 @@ int main(int argc, char **argv)
 			{ 0.5, -0.5},
 			{-0.5,  0.5},
 			{ 0.5,  0.5}};
+
+    int keep_texture_weights = 1; // try with 0 also
     int texture_colors = 3; // result will be 3+1 RGBA (for mono - 2)
 
 
@@ -465,11 +467,18 @@ int main(int argc, char **argv)
     // copy port indices to gpu
     gpu_port_offsets = (float *) copyalloc_kernel_gpu((float * ) port_offsets, num_ports * 2);
 
-    // allocates one correlation kernel per line (15x15 floats), number of rows - number of tiles * number of pairs
-    int tile_texture_size = (texture_colors+1)*256;
+
+
+//    int keep_texture_weights = 1; // try with 0 also
+//    int texture_colors = 3; // result will be 3+1 RGBA (for mono - 2)
+
+//		double [][] rgba = new double[numcol + 1 + (keep_weights?(ports + numcol + 1):0)][];
+
+    int tile_texture_size = (texture_colors + 1 + (keep_texture_weights? (NUM_CAMS + texture_colors + 1): 0)) *256;
+
     gpu_textures = alloc_image_gpu(
     		&dstride_textures,              // in bytes ! for one rgba/ya 16x16 tile
-			tile_texture_size,         // int width,
+			tile_texture_size,              // int width (floats),
 			TILESX * TILESY);               // int height);
 
 
@@ -777,7 +786,7 @@ int main(int argc, char **argv)
 		0.117647,              // float             weight1,            // scale for B
 		0.588235,              // float             weight2,            // scale for G
 		1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
-		1,                     // int               keep_weights,       // return channel weights after A in RGBA
+		keep_texture_weights,  // int               keep_weights,       // return channel weights after A in RGBA
 		dstride_textures/sizeof(float), // const size_t      texture_stride,     // in floats (now 256*4 = 1024)
 		gpu_textures);    // float           * gpu_texture_tiles);  // 4*16*16 rgba texture tiles
 
@@ -817,6 +826,23 @@ int main(int argc, char **argv)
     				cpu_textures,    // float *       data, // allocated array
 					rslt_texture_size,    // int           size, // length in elements
 					result_textures_file); // 			   const char *  path) // file path
+
+//DBG_TILE
+    		int texture_offset = DBG_TILE * tile_texture_size;
+    		int chn = 0;
+    		for (int i = 0; i < tile_texture_size; i++){
+    			if ((i % 256) == 0){
+    				printf("\nchn = %d\n", chn++);
+    			}
+    			printf("%10.4f", *(cpu_textures + texture_offset + i));
+    			if (((i + 1) % 16) == 0){
+    				printf("\n");
+    			} else {
+    				printf(" ");
+    			}
+    		}
+//    int tile_texture_size = (texture_colors + 1 + (keep_texture_weights? (NUM_CAMS + texture_colors + 1): 0)) *256;
+
 #endif
     		free(cpu_textures);
 #endif // ifndef NOTEXTURES
