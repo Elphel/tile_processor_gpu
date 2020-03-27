@@ -41,22 +41,22 @@
 #pragma once
 #include "dtt8x8.cuh"
 #define THREADSX         (DTT_SIZE)
+#define NUM_CAMS                  4
+#define NUM_PAIRS                 6
+#define NUM_COLORS                3
 #define IMG_WIDTH              2592
 #define IMG_HEIGHT             1936
 #define KERNELS_HOR             164
 #define KERNELS_VERT            123
-#define NUM_CAMS                  4
-#define NUM_PAIRS                 6
-#define NUM_COLORS                3
 #define KERNELS_LSTEP             4
 #define THREADS_PER_TILE          8
 #define TILES_PER_BLOCK           4
 #define CORR_THREADS_PER_TILE     8
 #define CORR_TILES_PER_BLOCK      4
-#define IMCLT_THREADS_PER_TILE   16
-#define IMCLT_TILES_PER_BLOCK     4
 #define TEXTURE_THREADS_PER_TILE  8
 #define TEXTURE_TILES_PER_BLOCK   1
+#define IMCLT_THREADS_PER_TILE   16
+#define IMCLT_TILES_PER_BLOCK     4
 #define CORR_NTILE_SHIFT          8 // higher bits - number of a pair, other bits tile number
 #define CORR_PAIRS_MASK        0x3f// lower bits used to address correlation pair for the selected tile
 #define CORR_TEXTURE_BIT          7 // bit 7 used to request texture for the tile
@@ -64,6 +64,7 @@
 #define TASK_TEXTURE_BIT          3 // bit to request texture calculation int task field of struct tp_task
 #define LIST_TEXTURE_BIT          7 // bit to request texture calculation
 #define CORR_OUT_RAD              4
+#define FAT_ZERO_WEIGHT           0.0001 // add to port weights to avoid nan
 
 //7
 //#define DEBUG1 1
@@ -74,7 +75,7 @@
 //#define DEBUG6 1
 #define DEBUG7 1
 #define DEBUG8 1
-//#define DEBUG9 1
+#define DEBUG9 1
 
 
 #endif
@@ -146,10 +147,10 @@
 #define BAYER_RED_COL 1
 //#define BAYER_BLUE_ROW (1 - BAYER_RED_ROW)
 //#define BAYER_BLUE_COL (1 - BAYER_RED_COL)
-
-
-#define DBG_TILE_X     40
-#define DBG_TILE_Y     80
+//#define DBG_TILE_X     40
+//#define DBG_TILE_Y     80
+#define DBG_TILE_X     49
+#define DBG_TILE_Y     66
 
 #define DBG_TILE     (DBG_TILE_Y * 324 + DBG_TILE_X)
 //56494
@@ -503,6 +504,7 @@ __device__ void debayer_shot(
 __device__ void tile_combine_rgba(
 		int     colors,        // number of colors
 		float * mclt_tile,     // debayer
+		float * rbg_tile,      // if not null - original (not-debayered) rbg tile to use for the output
 		float * rgba,          // result
 		float * ports_rgb,     // average values of R,G,B for each camera (R0,R1,...,B2,B3) // null
 		float * max_diff,      // maximal (weighted) deviation of each channel from the average /null
@@ -803,7 +805,7 @@ __global__ void convert_correct_tiles(
 			float           ** gpu_clt,            // [NUM_CAMS][TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 			size_t             dstride,            // in floats (pixels)
 			int                num_tiles,          // number of tiles in task
-			int                lpf_mask)           // apply lpf to colors : bit 0 - red, bit 1 - blue, bit2 - green
+			int                lpf_mask)           // apply lpf to colors : bit 0 - red, bit 1 - blue, bit2 - green. Now - always 0 !
 {
 	dim3 t = threadIdx;
 	int tile_in_block = threadIdx.y;
@@ -902,7 +904,11 @@ __global__ void textures_gen(
 		return; // nothing to do
 	}
 	// get number of tile
-	int tile_num = (gpu_texture_indices[tile_indx]) >> CORR_NTILE_SHIFT;
+	int tile_code = gpu_texture_indices[tile_indx];
+	if ((tile_code & (1 << CORR_TEXTURE_BIT)) == 0){
+		return; // nothing to do
+	}
+	int tile_num = tile_code >> CORR_NTILE_SHIFT;
 	__shared__ float mclt_tiles [NUM_CAMS][NUM_COLORS][2*DTT_SIZE][DTT_SIZE21];
 	__shared__ union {
 		float clt_tiles  [NUM_CAMS][NUM_COLORS][4][DTT_SIZE][DTT_SIZE1]; // NUM_CAMS == 4
@@ -1000,6 +1006,20 @@ __global__ void textures_gen(
 			__syncthreads();// __syncwarp();
 		} else {
 			// copy? - no, just remember to use mclt_tile, not mclt_dst
+			// will have to copy mclt_tiles -> mclt_dst as they have different gaps
+			// untested copy for mono mode
+#pragma unroll
+			for (int n = 0; n <= DTT_SIZE; n += DTT_SIZE){
+				float * msp = mclt_tile + threadIdx.x + n;
+				float * dst = mclt_dst +  threadIdx.x + n;
+#pragma unroll
+				for (int row = 0; row < DTT_SIZE2; row++){
+					*dst = *msp;
+					msp += DTT_SIZE21;
+					dst += DTT_SIZE21;
+				}
+			}
+			__syncthreads();
 		}
 #ifdef DEBUG77
 		//		float * mclt_dst =  (float *) shr.mclt_debayer[camera_num][color];
@@ -1055,10 +1075,11 @@ __global__ void textures_gen(
 	}
 	__syncthreads();// __syncwarp();
 #endif
-
+//	__shared__ float mclt_tiles [NUM_CAMS][NUM_COLORS][2*DTT_SIZE][DTT_SIZE21];
 	tile_combine_rgba(
 			colors,                    // int     colors,        // number of colors
 			(float*) shr.mclt_debayer, // float * mclt_tile,     // debayer // has gaps to align with union !
+			(float*) mclt_tiles,       // float * rbg_tile,      // if not null - original (not-debayered) rbg tile to use for the output
 			(float *) shr1.rgbaw,      // float * rgba,          // result
 			(float * ) 0,              // float * ports_rgb,     // average values of R,G,B for each camera (R0,R1,...,B2,B3) // null
 			(float * ) 0,              // float * max_diff,      // maximal (weighted) deviation of each channel from the average /null
@@ -1638,7 +1659,7 @@ __device__ void convertCorrectTile(
 		float               * gpu_images,
 		float               * gpu_clt,
 		const int             color,
-		const int             lpf_mask,
+		const int             lpf_mask, // now 0
 		const float           centerX,
 		const float           centerY,
 		const int             txy,
@@ -2711,6 +2732,7 @@ __device__ void debayer(
 __device__ void tile_combine_rgba(
 		int     colors,        // number of colors
 		float * mclt_tile,     // debayer // has gaps to align with union !
+		float * rbg_tile,      // if not null - original (not-debayered) rbg tile to use for the output
 		float * rgba,          // result
 		float * ports_rgb,     // average values of R,G,B for each camera (R0,R1,...,B2,B3) // null
 		float * max_diff,      // maximal (weighted) deviation of each channel from the average /null
@@ -2858,7 +2880,7 @@ __device__ void tile_combine_rgba(
 				dc *= wnd2_inv; // to compensate fading near the edges
 				d+= *(chn_weights + ncol) * dc * dc;
 			}
-			d = expf(-pair_dist2r[ipair] * d); // 0.5 for exact match, lower for mismatch. Add this weight to both ports involved
+			d = expf(-pair_dist2r[ipair] * d) + (FAT_ZERO_WEIGHT); // 0.5 for exact match, lower for mismatch. Add this weight to both ports involved
 			// Add weight to both channels in a pair
 			*(port_weights_i + (DTT_SIZE2*DTT_SIZE21) * pair_ports[ipair][0]) +=d;
 			*(port_weights_i + (DTT_SIZE2*DTT_SIZE21) * pair_ports[ipair][1]) +=d;
@@ -2964,7 +2986,7 @@ __device__ void tile_combine_rgba(
 			}
 			// TODO: Should it use pair_dist2r ? no as it is relative?
 			//				port_weights[ip][i] = Math.exp(-ksigma * d2[ip]);
-			*(port_weights_i + (DTT_SIZE2*DTT_SIZE21) * cam) = expf(-ksigma * d2_ip);
+			*(port_weights_i + (DTT_SIZE2*DTT_SIZE21) * cam) = expf(-ksigma * d2_ip) + (FAT_ZERO_WEIGHT);
 		}
 		// and now make a new average with those weights
 		// Inserting dust remove here
@@ -3033,22 +3055,30 @@ __device__ void tile_combine_rgba(
 
 
 		///
-		float k = 0.0;
+		if (rbg_tile) {
+			float k = 0.0;
+			int rbga_offset = colors * (DTT_SIZE2*DTT_SIZE21); // padded in union !
 #pragma unroll
-		for (int cam = 0; cam < NUM_CAMS; cam++){
-			k += *(port_weights_i + (DTT_SIZE2*DTT_SIZE21) * cam); // port_weights[ip][i];
-		}
-		k = 1.0/k;
+			for (int cam = 0; cam < NUM_CAMS; cam++){
+				k += *(port_weights_i + (DTT_SIZE2*DTT_SIZE21) * cam); // port_weights[ip][i];
+			}
+			k = 1.0/k;
+			float * rbg_tile_i = rbg_tile + i;
 #pragma unroll  // non-constant
-		for (int ncol = 0; ncol < colors; ncol++) { // if (iclt_tile[0][ncol] != null) {
-			float * rgba_col_i = rgba_i + ncol * (DTT_SIZE2*DTT_SIZE21);
-			float * mclt_col_i = mclt_tile_i + MCLT_UNION_LEN * ncol;
-			*rgba_col_i = 0.0; // color_avg[ncol][i] = 0;
+			for (int ncol = 0; ncol < colors; ncol++) { // if (iclt_tile[0][ncol] != null) {
+				float * rgba_col_i = rgba_i + ncol * (DTT_SIZE2*DTT_SIZE21);
+//				float * mclt_col_i = mclt_tile_i + MCLT_UNION_LEN * ncol;
+				float * rbg_col_i = rbg_tile_i + ncol * (DTT_SIZE2*DTT_SIZE21); // different gap between tiles than MCLT_UNION_LEN
+				*rgba_col_i = 0.0; // color_avg[ncol][i] = 0;
 #pragma unroll
-			for (int cam = 0; cam < NUM_CAMS; cam++) {
-				*rgba_col_i += k * *(port_weights_i + (DTT_SIZE2*DTT_SIZE21) * cam) * *(mclt_col_i + cam * colors_offset);
+				for (int cam = 0; cam < NUM_CAMS; cam++) {
+//					*rgba_col_i += k * *(port_weights_i + (DTT_SIZE2*DTT_SIZE21) * cam) * *(mclt_col_i + cam * colors_offset);
+					*rgba_col_i += k * *(port_weights_i + (DTT_SIZE2*DTT_SIZE21) * cam) * *(rbg_col_i +  cam * rbga_offset);
+				}
 			}
 		}
+//	int colors_offset = colors * MCLT_UNION_LEN; // padded in union !
+
 		// calculate alpha from channel weights. Start with just a sum of weights?
 //		int used_ports = NUM_CAMS;
 //		if (dust_remove){
