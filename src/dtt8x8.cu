@@ -51,10 +51,11 @@
 
 
 float * copyalloc_kernel_gpu(float * kernel_host,
-		                int size) // size in floats
+		                int size, // size in floats
+						int full_size)
 {
 	float *kernel_gpu;
-    checkCudaErrors(cudaMalloc((void **)&kernel_gpu, size * sizeof(float)));
+    checkCudaErrors(cudaMalloc((void **)&kernel_gpu, full_size * sizeof(float)));
     checkCudaErrors(cudaMemcpy( // segfault
     		kernel_gpu,
     		kernel_host,
@@ -62,6 +63,17 @@ float * copyalloc_kernel_gpu(float * kernel_host,
             cudaMemcpyHostToDevice));
     return kernel_gpu;
 }
+
+float * copyalloc_kernel_gpu(float * kernel_host,
+		                int size)
+{
+	return copyalloc_kernel_gpu(kernel_host,
+            size, // size in floats
+			size);
+}
+
+
+
 float * alloccopy_from_gpu(
 		float * gpu_data,
 		float * cpu_data, // if null, will allocate
@@ -294,7 +306,9 @@ int main(int argc, char **argv)
 
     struct tp_task     task_data [TILESX*TILESY]; // maximal length - each tile
     int                corr_indices         [NUM_PAIRS*TILESX*TILESY];
-    int                texture_indices      [TILESX*TILESY];
+//    int                texture_indices      [TILESX*TILESY];
+    int                texture_indices      [TILESX*TILESYA];
+    int                cpu_woi              [4];
 
     // host array of pointers to GPU memory
     float            * gpu_kernels_h        [NUM_CAMS];
@@ -312,6 +326,8 @@ int main(int argc, char **argv)
 
     float            * gpu_textures;
     int              * gpu_texture_indices;
+    int              * gpu_woi;
+    int              * gpu_num_texture_tiles;
     float            * gpu_port_offsets;
     int                num_corrs;
     int                num_textures;
@@ -448,14 +464,19 @@ int main(int argc, char **argv)
     }
     // num_corrs now has the total number of correlations
     // copy corr_indices to gpu
-    gpu_corr_indices = (int  *) copyalloc_kernel_gpu((float * ) corr_indices, num_corrs);
+//    gpu_corr_indices = (int  *) copyalloc_kernel_gpu((float * ) corr_indices, num_corrs);
+    gpu_corr_indices = (int  *) copyalloc_kernel_gpu(
+    		(float * ) corr_indices,
+			num_corrs,
+			NUM_PAIRS * TILESX * TILESY);
 
     // build texture_indices
     num_textures = 0;
     for (int ty = 0; ty < TILESY; ty++){
     	for (int tx = 0; tx < TILESX; tx++){
     		int nt = ty * TILESX + tx;
-    		int cm = (task_data[nt].task >> TASK_TEXTURE_BIT) & 1;
+//    		int cm = (task_data[nt].task >> TASK_TEXTURE_BIT) & 1;
+    		int cm = task_data[nt].task & TASK_TEXTURE_BITS;
     		if (cm){
     			texture_indices[num_textures++] = (nt << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT);
     		}
@@ -463,7 +484,15 @@ int main(int argc, char **argv)
     }
     // num_textures now has the total number of textures
     // copy corr_indices to gpu
-    gpu_texture_indices = (int  *) copyalloc_kernel_gpu((float * ) texture_indices, num_textures);
+//  gpu_texture_indices = (int  *) copyalloc_kernel_gpu((float * ) texture_indices, num_textures);
+    gpu_texture_indices = (int  *) copyalloc_kernel_gpu(
+    		(float * ) texture_indices,
+			num_textures,
+			TILESX * TILESYA); // number of rows - multiple of 4
+    // just allocate
+    checkCudaErrors(cudaMalloc((void **)&gpu_woi,               4 * sizeof(float)));
+    checkCudaErrors(cudaMalloc((void **)&gpu_num_texture_tiles, 4 * sizeof(float)));
+
     // copy port indices to gpu
     gpu_port_offsets = (float *) copyalloc_kernel_gpu((float * ) port_offsets, num_ports * 2);
 
@@ -780,7 +809,6 @@ int main(int argc, char **argv)
 		3.0,                   // float             scale_shot,         // 3.0
 		1.5f,                  // float             diff_sigma,         // pixel value/pixel change
 		10.0f,                 // float             diff_threshold,     // pixel value/pixel change
-//		int               diff_gauss,         // when averaging images, use gaussian around average as weight (false - sharp all/nothing)
 		3.0,                   // float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
 		0.294118,              // float             weight0,            // scale for R
 		0.117647,              // float             weight1,            // scale for B
@@ -828,6 +856,7 @@ int main(int argc, char **argv)
 					result_textures_file); // 			   const char *  path) // file path
 
 //DBG_TILE
+#ifdef DEBUG9
     		int texture_offset = DBG_TILE * tile_texture_size;
     		int chn = 0;
     		for (int i = 0; i < tile_texture_size; i++){
@@ -842,16 +871,88 @@ int main(int argc, char **argv)
     			}
     		}
 //    int tile_texture_size = (texture_colors + 1 + (keep_texture_weights? (NUM_CAMS + texture_colors + 1): 0)) *256;
-
+#endif // DEBUG9
 #endif
     		free(cpu_textures);
 #endif // ifndef NOTEXTURES
 
 
+#define GEN_TEXTURE_LIST
+#ifdef  GEN_TEXTURE_LIST
+    		dim3 threads_list(1,1, 1); // TEXTURE_TILES_PER_BLOCK, 1);
+    		dim3 grid_list   (1,1,1);
+    		printf("threads_list=(%d, %d, %d)\n",threads_list.x,threads_list.y,threads_list.z);
+    		printf("grid_list=(%d, %d, %d)\n",grid_list.x,grid_list.y,grid_list.z);
+    		StopWatchInterface *timerTEXTURELIST = 0;
+    		sdkCreateTimer(&timerTEXTURELIST);
+    		for (int i = i0; i < numIterations; i++)
+    		{
+    			if (i == 0)
+    			{
+    				checkCudaErrors(cudaDeviceSynchronize());
+    				sdkResetTimer(&timerTEXTURELIST);
+    				sdkStartTimer(&timerTEXTURELIST);
+    			}
 
+    			prepare_texture_list<<<grid_list,threads_list>>> (
+    					gpu_tasks,             // struct tp_task   * gpu_tasks,
+						tp_task_size,          // int                num_tiles,          // number of tiles in task list
+						gpu_texture_indices,   // int              * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
+						gpu_num_texture_tiles, // int              * num_texture_tiles,  // number of texture tiles to process (4 elements)
+						gpu_woi,               // int              * woi,                // x,y,width,height of the woi
+						TILESX,                // int                width,  // <= TILESX, use for faster processing of LWIR images (should be actual + 1)
+						TILESY);               // int                height); // <= TILESY, use for faster processing of LWIR images
 
+    			getLastCudaError("Kernel failure");
+    			checkCudaErrors(cudaDeviceSynchronize());
+    			printf("test pass: %d\n",i);
+#ifdef DEBUG4
+    			break;
+#endif
+#ifdef DEBUG5
+    			break;
+#endif
+    		}
+    		///	cudaProfilerStop();
+    		sdkStopTimer(&timerTEXTURELIST);
+    		float avgTimeTEXTURESLIST = (float)sdkGetTimerValue(&timerTEXTURELIST) / (float)numIterations;
+    		sdkDeleteTimer(&timerTEXTURELIST);
+    		printf("Average TextureList run time =%f ms\n",  avgTimeTEXTURESLIST);
 
-
+    		int cpu_num_texture_tiles[4];
+    		checkCudaErrors(cudaMemcpy(
+    				cpu_woi,
+					gpu_woi,
+					4 * sizeof(float),
+					cudaMemcpyDeviceToHost));
+    		printf("WOI x=%d, y=%d, width=%d, height=%d\n", cpu_woi[0], cpu_woi[1], cpu_woi[2], cpu_woi[3]);
+    		checkCudaErrors(cudaMemcpy(
+//    				&cpu_num_texture_tiles,
+    				cpu_num_texture_tiles,
+					gpu_num_texture_tiles,
+					4 * sizeof(float), // 4 separate sequences
+					cudaMemcpyDeviceToHost));
+    		printf("cpu_num_texture_tiles=(%d, %d, %d, %d)\n", cpu_num_texture_tiles[0],
+    				cpu_num_texture_tiles[1], cpu_num_texture_tiles[2], cpu_num_texture_tiles[3]);
+    		for (int q = 0; q < 4; q++) {
+    			checkCudaErrors(cudaMemcpy(
+    					texture_indices  + q * TILESX * (TILESYA >> 2),
+						gpu_texture_indices  + q * TILESX * (TILESYA >> 2),
+						cpu_num_texture_tiles[q] * sizeof(float), // change to cpu_num_texture_tiles when ready
+						cudaMemcpyDeviceToHost));
+    		}
+    		for (int q = 0; q < 4; q++) {
+        		printf("%d: %3x:%3x %3x:%3x %3x:%3x %3x:%3x %3x:%3x %3x:%3x %3x:%3x %3x:%3x \n",q,
+        				(texture_indices[q * TILESX * (TILESYA >> 2) + 0] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 0] >> 8) % TILESX,
+        				(texture_indices[q * TILESX * (TILESYA >> 2) + 1] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 1] >> 8) % TILESX,
+        				(texture_indices[q * TILESX * (TILESYA >> 2) + 2] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 2] >> 8) % TILESX,
+        				(texture_indices[q * TILESX * (TILESYA >> 2) + 3] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 3] >> 8) % TILESX,
+        				(texture_indices[q * TILESX * (TILESYA >> 2) + 4] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 4] >> 8) % TILESX,
+        				(texture_indices[q * TILESX * (TILESYA >> 2) + 5] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 5] >> 8) % TILESX,
+        				(texture_indices[q * TILESX * (TILESYA >> 2) + 6] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 6] >> 8) % TILESX,
+        				(texture_indices[q * TILESX * (TILESYA >> 2) + 7] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 7] >> 8) % TILESX);
+    		}
+#endif //GEN_TEXTURE_LIST
 
 #ifdef SAVE_CLT
     free(cpu_clt);
@@ -879,6 +980,8 @@ int main(int argc, char **argv)
 	checkCudaErrors(cudaFree(gpu_texture_indices));
 	checkCudaErrors(cudaFree(gpu_port_offsets));
 	checkCudaErrors(cudaFree(gpu_textures));
+	checkCudaErrors(cudaFree(gpu_woi));
+	checkCudaErrors(cudaFree(gpu_num_texture_tiles));
 
 
 

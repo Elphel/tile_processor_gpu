@@ -61,6 +61,10 @@
 #define CORR_PAIRS_MASK        0x3f// lower bits used to address correlation pair for the selected tile
 #define CORR_TEXTURE_BIT          7 // bit 7 used to request texture for the tile
 #define TASK_CORR_BITS            4
+#define TASK_TEXTURE_N_BIT        0 // Texture with North neighbor
+#define TASK_TEXTURE_E_BIT        1 // Texture with East  neighbor
+#define TASK_TEXTURE_S_BIT        2 // Texture with South neighbor
+#define TASK_TEXTURE_W_BIT        3 // Texture with West  neighbor
 #define TASK_TEXTURE_BIT          3 // bit to request texture calculation int task field of struct tp_task
 #define LIST_TEXTURE_BIT          7 // bit to request texture calculation
 #define CORR_OUT_RAD              4
@@ -82,7 +86,12 @@
 #define DEBUG9 1
 */
 
-#endif
+#endif //#ifndef JCUDA
+
+#define TASK_TEXTURE_BITS ((1 << TASK_TEXTURE_N_BIT) | (1 << TASK_TEXTURE_E_BIT) | (1 << TASK_TEXTURE_S_BIT) | (1 << TASK_TEXTURE_W_BIT))
+
+
+
 //#define IMCLT14
 //#define NOICLT 1
 //#define TEST_IMCLT
@@ -131,6 +140,8 @@
 #define KERNELS_STEP  (1 << KERNELS_LSTEP)
 #define TILESX        (IMG_WIDTH / DTT_SIZE)
 #define TILESY        (IMG_HEIGHT / DTT_SIZE)
+// Make TILESYA >= TILESX and a multiple of 4
+#define TILESYA       ((TILESY +3) & (~3))
 // increase row length by 1 so vertical passes will use different ports
 #define DTT_SIZE1        (DTT_SIZE + 1)
 #define DTT_SIZE2        (2 * DTT_SIZE)
@@ -162,9 +173,10 @@
 //#define TASK_SIZE      12
 struct tp_task {
 	int   task;
-	int   txy;
-//	short ty;
-//	short tx;
+	union {
+		int      txy;
+		unsigned short sxy[2];
+	};
 	float xy[NUM_CAMS][2];
 };
 struct CltExtra{
@@ -1101,11 +1113,29 @@ __device__ void imclt_plane( // not implemented, not used
 		float           * gpu_rbg,            // WIDTH, HEIGHT
 		const size_t      dstride);            // in floats (pixels)
 
+extern "C"
 __global__ void clear_texture_list(
 		int              * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
 		int                width,  // <= TILESX, use for faster processing of LWIR images
 		int                height); // <= TILESY, use for faster processing of LWIR images
 
+extern "C"
+__global__ void mark_texture_tiles(
+		struct tp_task   * gpu_tasks,
+		int                num_tiles,            // number of tiles in task list
+		int              * gpu_texture_indices); // packed tile + bits (now only (1 << 7)
+extern "C"
+__global__ void mark_texture_neighbor_tiles(
+		struct tp_task   * gpu_tasks,
+		int                num_tiles,           // number of tiles in task list
+		int              * gpu_texture_indices); // packed tile + bits (now only (1 << 7)
+extern "C"
+__global__ void gen_texture_list(
+		struct tp_task   * gpu_tasks,
+		int                num_tiles,           // number of tiles in task list
+		int              * gpu_texture_indices, // packed tile + bits (now only (1 << 7)
+		int              * num_texture_tiles,  // number of texture tiles to process
+		int              * woi);                // x,y,width,height of the woi
 
 extern "C"
 __global__ void correlate2D(
@@ -1386,41 +1416,176 @@ __global__ void prepare_texture_list(
 			struct tp_task   * gpu_tasks,
 			int                num_tiles,          // number of tiles in task list
 			int              * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
-			int              * num_texture_tiles,  // number of texture tiles to process
+			int              * num_texture_tiles,  // number of texture tiles to process  (4 separate elements for accumulation)
 			int              * woi,                // x,y,width,height of the woi
-			int                width,  // <= TILESX, use for faster processing of LWIR images
+			int                width,  // <= TILESX, use for faster processing of LWIR images (should be actual + 1)
 			int                height) // <= TILESY, use for faster processing of LWIR images
 {
+// TODO use atomic_add to increment	num_texture_tiles
+// TODO calculate woi
 //	int task_num = blockIdx.x;
 //	int tid = threadIdx.x; // maybe it will be just <<<1,1>>>
-    dim3 threads((1 << THREADS_DYNAMIC_BITS), 1, 1);
+    dim3 threads0((1 << THREADS_DYNAMIC_BITS), 1, 1);
     int blocks_x = (width + 1) >> THREADS_DYNAMIC_BITS;
-    dim3 blocks (blocks_x, height, 1);
+    dim3 blocks0 (blocks_x, height, 1);
 
 	if (threadIdx.x == 0) {
-		clear_texture_list<<<blocks,threads>>>(
+		clear_texture_list<<<blocks0,threads0>>>(
 				gpu_texture_indices,
 				width,
 				height);
 		cudaDeviceSynchronize(); // not needed yet, just for testing
+		dim3 threads((1 << THREADS_DYNAMIC_BITS), 1, 1);
+		int blocks_t =   (num_tiles + 1) >> THREADS_DYNAMIC_BITS;//
+	    dim3 blocks(blocks_t, 1, 1);
+	    // mark used tiles in gpu_texture_indices memory
+		mark_texture_tiles <<<blocks,threads>>>(
+				gpu_tasks,
+				num_tiles,          // number of tiles in task list
+				gpu_texture_indices); // packed tile + bits (now only (1 << 7)
+		cudaDeviceSynchronize(); // not needed yet, just for testing
+	    // mark n/e/s/w used tiles from gpu_texture_indices memory to gpu_tasks lower 4 bits
+		mark_texture_neighbor_tiles <<<blocks,threads>>>(
+				gpu_tasks,
+				num_tiles,          // number of tiles in task list
+				gpu_texture_indices); // packed tile + bits (now only (1 << 7)
+		cudaDeviceSynchronize(); // not needed yet, just for testing
+	    // Generate tile indices list, upper 24 bits - tile index, lower 4 bits: n/e/s/w neighbors, bit 7 - set to 1
+		*(woi + 0) = TILESX;
+		*(woi + 1) = TILESY;
+		*(woi + 2) = 0;
+		*(woi + 3) = 0;
+		*(num_texture_tiles+0) = 0;
+		*(num_texture_tiles+1) = 0;
+		*(num_texture_tiles+2) = 0;
+		*(num_texture_tiles+3) = 0;
+
+		gen_texture_list <<<blocks,threads>>>(
+				gpu_tasks,
+				num_tiles,          // number of tiles in task list
+				gpu_texture_indices, // packed tile + bits (now only (1 << 7)
+				num_texture_tiles,  // number of texture tiles to process
+				woi);                // x,y,width,height of the woi
+
+		cudaDeviceSynchronize(); // not needed yet, just for testing
+		*(woi + 2) += 1 - *(woi + 0);
+		*(woi + 3) += 1 - *(woi + 1);
 	}
 	 __syncthreads();
 }
 
 // blockDim.x * gridDim.x >= width
-
+extern "C"
 __global__ void clear_texture_list(
 		int              * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
 		int                width,  // <= TILESX, use for faster processing of LWIR images
 		int                height) // <= TILESY, use for faster processing of LWIR images
 {
-	int col = threadIdx.x + blockDim.x * blockIdx.x;
+	int col = blockDim.x * blockIdx.x + threadIdx.x;
 	int row = blockIdx.y;
 	if (col > width) {
 		return;
 	}
-	*(gpu_texture_indices + col + row * TILESX) = 0.0;
+	*(gpu_texture_indices + col + row * TILESX) = 0;
 }
+
+// treads (*,1,1), blocks = (*,1,1)
+extern "C"
+__global__ void mark_texture_tiles(
+		struct tp_task   * gpu_tasks,
+		int                num_tiles,           // number of tiles in task list
+		int              * gpu_texture_indices) // packed tile + bits (now only (1 << 7)
+{
+	int task_num = blockDim.x * blockIdx.x + threadIdx.x;
+	if (task_num >= num_tiles) {
+		return; // nothing to do
+	}
+//	struct tp_task  * gpu_task = &gpu_tasks[task_num];
+//	int task = gpu_task->task;
+	int task = gpu_tasks[task_num].task;
+	if (!(task & TASK_TEXTURE_BITS)){ // here any bit in TASK_TEXTURE_BITS is sufficient
+		return; // NOP tile
+	}
+//	int cxy = gpu_task->txy;
+	int cxy = gpu_tasks[task_num].txy;
+	*(gpu_texture_indices + (cxy & 0xffff) + (cxy >> 16) * TILESX) = 1;
+}
+
+
+// treads (*,1,1), blocks = (*,1,1)
+extern "C"
+__global__ void mark_texture_neighbor_tiles(
+		struct tp_task   * gpu_tasks,
+		int                num_tiles,           // number of tiles in task list
+		int              * gpu_texture_indices) // packed tile + bits (now only (1 << 7)
+{
+	int task_num = blockDim.x * blockIdx.x + threadIdx.x;
+	if (task_num >= num_tiles) {
+		return; // nothing to do
+	}
+//	struct tp_task  * gpu_task = &gpu_tasks[task_num];
+//	int task = gpu_task->task;
+	int task = gpu_tasks[task_num].task;
+	if (!(task & TASK_TEXTURE_BITS)){ // here any bit in TASK_TEXTURE_BITS is sufficient
+		return; // NOP tile
+	}
+//	int cxy = gpu_task->txy;
+	int cxy = gpu_tasks[task_num].txy;
+	int x = (cxy & 0xffff);
+	int y = (cxy >> 16);
+	int d = 0;
+	if ((y > 0)            && *(gpu_texture_indices +  x +     (y - 1) * TILESX)) d |= (1 << TASK_TEXTURE_N_BIT);
+	if ((x < (TILESX - 1)) && *(gpu_texture_indices + (x + 1) + y *      TILESX)) d |= (1 << TASK_TEXTURE_E_BIT);
+	if ((y < (TILESY - 1)) && *(gpu_texture_indices +  x +     (y + 1) * TILESX)) d |= (1 << TASK_TEXTURE_S_BIT);
+	if ((x > 0)            && *(gpu_texture_indices + (x - 1) + y *      TILESX)) d |= (1 << TASK_TEXTURE_W_BIT);
+	gpu_tasks[task_num].task = ((task ^ d) & TASK_TEXTURE_BITS) ^ task;
+}
+
+extern "C"
+__global__ void gen_texture_list(
+		struct tp_task   * gpu_tasks,
+		int                num_tiles,            // number of tiles in task list
+		int              * gpu_texture_indices, // packed tile + bits (now only (1 << 7)
+		int              * num_texture_tiles,    // number of texture tiles to process
+		int              * woi)                  // x,y,width,height of the woi
+
+{
+//	int *gpu_texture_indices1 = gpu_texture_indices0 + TILESX * (TILESYA >> 2);
+//	int *gpu_texture_indices2 = gpu_texture_indices1 + TILESX * (TILESYA >> 2);
+//	int *gpu_texture_indices3 = gpu_texture_indices2 + TILESX * (TILESYA >> 2);
+	int task_num = blockDim.x * blockIdx.x + threadIdx.x;
+	if (task_num >= num_tiles) {
+		return; // nothing to do
+	}
+//	struct tp_task  * gpu_task = &gpu_tasks[task_num];
+//	int task = gpu_task->task;
+	int task = gpu_tasks[task_num].task & TASK_TEXTURE_BITS;
+	if (!task){ // here any bit in TASK_TEXTURE_BITS is sufficient
+		return; // NOP tile
+	}
+//	int cxy = gpu_task->txy;
+	int cxy = gpu_tasks[task_num].txy;
+	int x = (cxy & 0xffff);
+	int y = (cxy >> 16);
+	if (x & 1) {
+		gpu_texture_indices += TILESX * (TILESYA >> 2); //TILESYA - 2 LSB == 00
+		num_texture_tiles += 1; // int *
+	}
+	if (y & 1) {
+		gpu_texture_indices += TILESX * (TILESYA >> 1);
+		num_texture_tiles += 2; // int *
+	}
+	// using atomic operation in global memory - slow, but as operations here are per-til, not per- pixel, it should be OK
+	atomicMin(woi+0, x);
+	atomicMin(woi+1, y);
+	atomicMax(woi+2, x);
+	atomicMax(woi+3, y);
+	*(gpu_texture_indices + atomicAdd(num_texture_tiles, 1)) = task | ((x + y * TILESX) << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT);
+}
+
+//CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT);
+
+
 #endif //#ifdef USE_CDP
 
 
