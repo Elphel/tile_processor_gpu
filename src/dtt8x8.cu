@@ -325,6 +325,7 @@ int main(int argc, char **argv)
     int              * gpu_corr_indices;
 
     float            * gpu_textures;
+    float            * gpu_textures_rbga;
     int              * gpu_texture_indices;
     int              * gpu_woi;
     int              * gpu_num_texture_tiles;
@@ -346,6 +347,7 @@ int main(int argc, char **argv)
     size_t  dstride_rslt;     // in bytes !
     size_t  dstride_corr;     // in bytes ! for one 2d phase correlation (padded 15x15x4 bytes)
     size_t  dstride_textures; // in bytes ! for one rgba/ya 16x16 tile
+    size_t  dstride_textures_rbga; // in bytes ! for one rgba/ya 16x16 tile
 
 
     float lpf_rbg[3][64]; // not used
@@ -491,7 +493,8 @@ int main(int argc, char **argv)
 			TILESX * TILESYA); // number of rows - multiple of 4
     // just allocate
     checkCudaErrors(cudaMalloc((void **)&gpu_woi,               4 * sizeof(float)));
-    checkCudaErrors(cudaMalloc((void **)&gpu_num_texture_tiles, 4 * sizeof(float)));
+    checkCudaErrors(cudaMalloc((void **)&gpu_num_texture_tiles, 8 * sizeof(float))); // for each subsequence - number of non-border,
+    // number of border tiles
 
     // copy port indices to gpu
     gpu_port_offsets = (float *) copyalloc_kernel_gpu((float * ) port_offsets, num_ports * 2);
@@ -509,6 +512,15 @@ int main(int argc, char **argv)
     		&dstride_textures,              // in bytes ! for one rgba/ya 16x16 tile
 			tile_texture_size,              // int width (floats),
 			TILESX * TILESY);               // int height);
+
+    int rgba_width =   TILESX * DTT_SIZE;
+    int rgba_height =  TILESY * DTT_SIZE;
+    int rbga_slices =  texture_colors + 1; // 4/1
+
+    gpu_textures_rbga = alloc_image_gpu(
+    		&dstride_textures_rbga,              // in bytes ! for one rgba/ya 16x16 tile
+			rgba_width,              // int width (floats),
+			rgba_height * rbga_slices);               // int height);
 
 
     // Now copy arrays of per-camera pointers to GPU memory to GPU itself
@@ -797,26 +809,53 @@ int main(int argc, char **argv)
 		// Channel0 weight = 0.294118
 		// Channel1 weight = 0.117647
 		// Channel2 weight = 0.588235
-
-        textures_gen<<<grid_texture,threads_texture>>> (
-        gpu_clt ,              // float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
-		num_textures,          // size_t            num_texture_tiles,  // number of texture tiles to process
-		gpu_texture_indices,   // int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
-		gpu_port_offsets,      // float           * port_offsets,       // relative ports x,y offsets - just to scale differences, may be approximate
-		texture_colors,        // int               colors,             // number of colors (3/1)
-		(texture_colors == 1), // int               is_lwir,            // do not perform shot correction
-		10.0,                  // float             min_shot,           // 10.0
-		3.0,                   // float             scale_shot,         // 3.0
-		1.5f,                  // float             diff_sigma,         // pixel value/pixel change
-		10.0f,                 // float             diff_threshold,     // pixel value/pixel change
-		3.0,                   // float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
-		0.294118,              // float             weight0,            // scale for R
-		0.117647,              // float             weight1,            // scale for B
-		0.588235,              // float             weight2,            // scale for G
-		1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
-		keep_texture_weights,  // int               keep_weights,       // return channel weights after A in RGBA
-		dstride_textures/sizeof(float), // const size_t      texture_stride,     // in floats (now 256*4 = 1024)
-		gpu_textures);    // float           * gpu_texture_tiles);  // 4*16*16 rgba texture tiles
+#define TEXTURES_ACCUMULATE
+#ifdef TEXTURES_ACCUMULATE
+    	textures_accumulate<<<grid_texture,threads_texture>>> (
+    			0,          // int               border_tile,        // if 1 - watch for border
+    			(int *) 0,  //      int             * woi,                // x, y, width,height
+		        gpu_clt ,              // float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
+				num_textures,          // size_t            num_texture_tiles,  // number of texture tiles to process
+				gpu_texture_indices,   // int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
+				gpu_port_offsets,      // float           * port_offsets,       // relative ports x,y offsets - just to scale differences, may be approximate
+				texture_colors,        // int               colors,             // number of colors (3/1)
+				(texture_colors == 1), // int               is_lwir,            // do not perform shot correction
+				10.0,                  // float             min_shot,           // 10.0
+				3.0,                   // float             scale_shot,         // 3.0
+				1.5f,                  // float             diff_sigma,         // pixel value/pixel change
+				10.0f,                 // float             diff_threshold,     // pixel value/pixel change
+				3.0,                   // float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
+				0.294118,              // float             weight0,            // scale for R
+				0.117647,              // float             weight1,            // scale for B
+				0.588235,              // float             weight2,            // scale for G
+				1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
+				keep_texture_weights,  // int               keep_weights,       // return channel weights after A in RGBA
+    	// combining both non-overlap and overlap (each calculated if pointer is not null )
+    			0, // const size_t      texture_rbg_stride, // in floats
+    			(float *) 0, // float           * gpu_texture_rbg,     // (number of colors +1 + ?)*16*16 rgba texture tiles
+				dstride_textures/sizeof(float), // const size_t      texture_stride,     // in floats (now 256*4 = 1024)
+				gpu_textures);    // float           * gpu_texture_tiles);  // 4*16*16 rgba texture tiles
+#else
+    	textures_gen<<<grid_texture,threads_texture>>> (
+    			gpu_clt ,              // float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
+				num_textures,          // size_t            num_texture_tiles,  // number of texture tiles to process
+				gpu_texture_indices,   // int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
+				gpu_port_offsets,      // float           * port_offsets,       // relative ports x,y offsets - just to scale differences, may be approximate
+				texture_colors,        // int               colors,             // number of colors (3/1)
+				(texture_colors == 1), // int               is_lwir,            // do not perform shot correction
+				10.0,                  // float             min_shot,           // 10.0
+				3.0,                   // float             scale_shot,         // 3.0
+				1.5f,                  // float             diff_sigma,         // pixel value/pixel change
+				10.0f,                 // float             diff_threshold,     // pixel value/pixel change
+				3.0,                   // float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
+				0.294118,              // float             weight0,            // scale for R
+				0.117647,              // float             weight1,            // scale for B
+				0.588235,              // float             weight2,            // scale for G
+				1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
+				keep_texture_weights,  // int               keep_weights,       // return channel weights after A in RGBA
+				dstride_textures/sizeof(float), // const size_t      texture_stride,     // in floats (now 256*4 = 1024)
+				gpu_textures);    // float           * gpu_texture_tiles);  // 4*16*16 rgba texture tiles
+#endif
 
     	getLastCudaError("Kernel failure");
     	checkCudaErrors(cudaDeviceSynchronize());
@@ -856,7 +895,7 @@ int main(int argc, char **argv)
 					result_textures_file); // 			   const char *  path) // file path
 
 //DBG_TILE
-#ifdef DEBUG9
+#ifdef DEBUG10
     		int texture_offset = DBG_TILE * tile_texture_size;
     		int chn = 0;
     		for (int i = 0; i < tile_texture_size; i++){
@@ -898,7 +937,7 @@ int main(int argc, char **argv)
     					gpu_tasks,             // struct tp_task   * gpu_tasks,
 						tp_task_size,          // int                num_tiles,          // number of tiles in task list
 						gpu_texture_indices,   // int              * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
-						gpu_num_texture_tiles, // int              * num_texture_tiles,  // number of texture tiles to process (4 elements)
+						gpu_num_texture_tiles, // int              * num_texture_tiles,  // number of texture tiles to process (8 elements)
 						gpu_woi,               // int              * woi,                // x,y,width,height of the woi
 						TILESX,                // int                width,  // <= TILESX, use for faster processing of LWIR images (should be actual + 1)
 						TILESY);               // int                height); // <= TILESY, use for faster processing of LWIR images
@@ -930,10 +969,20 @@ int main(int argc, char **argv)
 //    				&cpu_num_texture_tiles,
     				cpu_num_texture_tiles,
 					gpu_num_texture_tiles,
-					4 * sizeof(float), // 4 separate sequences
+					8 * sizeof(float), // 8 sequences (0,2,4,6 - non-border, growing up;
+					//1,3,5,7 - border, growing down from the end of the corresponding non-border buffers
 					cudaMemcpyDeviceToHost));
-    		printf("cpu_num_texture_tiles=(%d, %d, %d, %d)\n", cpu_num_texture_tiles[0],
-    				cpu_num_texture_tiles[1], cpu_num_texture_tiles[2], cpu_num_texture_tiles[3]);
+    		printf("cpu_num_texture_tiles=(%d(%d), %d(%d), %d(%d), %d(%d) -> %d tp_task_size=%d)\n",
+    				cpu_num_texture_tiles[0], cpu_num_texture_tiles[1],
+					cpu_num_texture_tiles[2], cpu_num_texture_tiles[3],
+					cpu_num_texture_tiles[4], cpu_num_texture_tiles[5],
+					cpu_num_texture_tiles[6], cpu_num_texture_tiles[7],
+    				cpu_num_texture_tiles[0] + cpu_num_texture_tiles[1] +
+					cpu_num_texture_tiles[2] + cpu_num_texture_tiles[3] +
+					cpu_num_texture_tiles[4] + cpu_num_texture_tiles[5] +
+					cpu_num_texture_tiles[6] + cpu_num_texture_tiles[7],
+					tp_task_size
+					);
     		for (int q = 0; q < 4; q++) {
     			checkCudaErrors(cudaMemcpy(
     					texture_indices  + q * TILESX * (TILESYA >> 2),
@@ -980,6 +1029,7 @@ int main(int argc, char **argv)
 	checkCudaErrors(cudaFree(gpu_texture_indices));
 	checkCudaErrors(cudaFree(gpu_port_offsets));
 	checkCudaErrors(cudaFree(gpu_textures));
+	checkCudaErrors(cudaFree(gpu_textures_rbga));
 	checkCudaErrors(cudaFree(gpu_woi));
 	checkCudaErrors(cudaFree(gpu_num_texture_tiles));
 
