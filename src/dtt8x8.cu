@@ -260,7 +260,8 @@ int main(int argc, char **argv)
 			"/data_ssd/git/tile_processor_gpu/clt/main_chn2.rbg",
 			"/data_ssd/git/tile_processor_gpu/clt/main_chn3.rbg"};
     const char* result_corr_file = "/data_ssd/git/tile_processor_gpu/clt/main_corr.corr";
-    const char* result_textures_file = "/data_ssd/git/tile_processor_gpu/clt/texture.rgba";
+    const char* result_textures_file =       "/data_ssd/git/tile_processor_gpu/clt/texture.rgba";
+    const char* result_textures_rgba_file = "/data_ssd/git/tile_processor_gpu/clt/texture_rgba.rgba";
     // not yet used
     float lpf_sigmas[3] = {0.9f, 0.9f, 0.9f}; // G, B, G
 
@@ -429,7 +430,6 @@ int main(int argc, char **argv)
     int tp_task_size =  sizeof(task_data)/sizeof(struct tp_task);
 
 
-#ifdef DBG_TILE
 #ifdef DBG0
 //#define NUM_TEST_TILES 128
 #define NUM_TEST_TILES 1
@@ -445,7 +445,6 @@ int main(int argc, char **argv)
     }
     tp_task_size =  NUM_TEST_TILES; // sizeof(task_data)/sizeof(float);
 
-#endif
 #endif
 
     // segfault in the next
@@ -660,24 +659,10 @@ int main(int argc, char **argv)
     				}
     			}
     		}
-#ifdef DEBUG4
-    		break;
-#endif
-#ifdef DEBUG5
-    		break;
-#endif
-
     	}
     	getLastCudaError("Kernel failure");
     	checkCudaErrors(cudaDeviceSynchronize());
     	printf("test pass: %d\n",i);
-#ifdef DEBUG4
-    	break;
-#endif
-#ifdef DEBUG5
-    		break;
-#endif
-
     }
 
     sdkStopTimer(&timerIMCLT);
@@ -746,12 +731,6 @@ int main(int argc, char **argv)
     	getLastCudaError("Kernel failure");
     	checkCudaErrors(cudaDeviceSynchronize());
     	printf("test pass: %d\n",i);
-#ifdef DEBUG4
-    	break;
-#endif
-#ifdef DEBUG5
-    		break;
-#endif
     }
 
     sdkStopTimer(&timerCORR);
@@ -809,8 +788,6 @@ int main(int argc, char **argv)
 		// Channel0 weight = 0.294118
 		// Channel1 weight = 0.117647
 		// Channel2 weight = 0.588235
-#define TEXTURES_ACCUMULATE
-#ifdef TEXTURES_ACCUMULATE
     	textures_accumulate<<<grid_texture,threads_texture>>> (
     			0,          // int               border_tile,        // if 1 - watch for border
     			(int *) 0,  //      int             * woi,                // x, y, width,height
@@ -835,37 +812,9 @@ int main(int argc, char **argv)
     			(float *) 0, // float           * gpu_texture_rbg,     // (number of colors +1 + ?)*16*16 rgba texture tiles
 				dstride_textures/sizeof(float), // const size_t      texture_stride,     // in floats (now 256*4 = 1024)
 				gpu_textures);    // float           * gpu_texture_tiles);  // 4*16*16 rgba texture tiles
-#else
-    	textures_gen<<<grid_texture,threads_texture>>> (
-    			gpu_clt ,              // float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
-				num_textures,          // size_t            num_texture_tiles,  // number of texture tiles to process
-				gpu_texture_indices,   // int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
-				gpu_port_offsets,      // float           * port_offsets,       // relative ports x,y offsets - just to scale differences, may be approximate
-				texture_colors,        // int               colors,             // number of colors (3/1)
-				(texture_colors == 1), // int               is_lwir,            // do not perform shot correction
-				10.0,                  // float             min_shot,           // 10.0
-				3.0,                   // float             scale_shot,         // 3.0
-				1.5f,                  // float             diff_sigma,         // pixel value/pixel change
-				10.0f,                 // float             diff_threshold,     // pixel value/pixel change
-				3.0,                   // float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
-				0.294118,              // float             weight0,            // scale for R
-				0.117647,              // float             weight1,            // scale for B
-				0.588235,              // float             weight2,            // scale for G
-				1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
-				keep_texture_weights,  // int               keep_weights,       // return channel weights after A in RGBA
-				dstride_textures/sizeof(float), // const size_t      texture_stride,     // in floats (now 256*4 = 1024)
-				gpu_textures);    // float           * gpu_texture_tiles);  // 4*16*16 rgba texture tiles
-#endif
-
     	getLastCudaError("Kernel failure");
     	checkCudaErrors(cudaDeviceSynchronize());
     	printf("test pass: %d\n",i);
-#ifdef DEBUG4
-    	break;
-#endif
-#ifdef DEBUG5
-    		break;
-#endif
     }
 ///	cudaProfilerStop();
     sdkStopTimer(&timerTEXTURE);
@@ -945,12 +894,6 @@ int main(int argc, char **argv)
     			getLastCudaError("Kernel failure");
     			checkCudaErrors(cudaDeviceSynchronize());
     			printf("test pass: %d\n",i);
-#ifdef DEBUG4
-    			break;
-#endif
-#ifdef DEBUG5
-    			break;
-#endif
     		}
     		///	cudaProfilerStop();
     		sdkStopTimer(&timerTEXTURELIST);
@@ -958,7 +901,7 @@ int main(int argc, char **argv)
     		sdkDeleteTimer(&timerTEXTURELIST);
     		printf("Average TextureList run time =%f ms\n",  avgTimeTEXTURESLIST);
 
-    		int cpu_num_texture_tiles[4];
+    		int cpu_num_texture_tiles[8];
     		checkCudaErrors(cudaMemcpy(
     				cpu_woi,
 					gpu_woi,
@@ -966,7 +909,6 @@ int main(int argc, char **argv)
 					cudaMemcpyDeviceToHost));
     		printf("WOI x=%d, y=%d, width=%d, height=%d\n", cpu_woi[0], cpu_woi[1], cpu_woi[2], cpu_woi[3]);
     		checkCudaErrors(cudaMemcpy(
-//    				&cpu_num_texture_tiles,
     				cpu_num_texture_tiles,
 					gpu_num_texture_tiles,
 					8 * sizeof(float), // 8 sequences (0,2,4,6 - non-border, growing up;
@@ -1002,6 +944,121 @@ int main(int argc, char **argv)
         				(texture_indices[q * TILESX * (TILESYA >> 2) + 7] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 7] >> 8) % TILESX);
     		}
 #endif //GEN_TEXTURE_LIST
+
+
+
+#ifndef NOTEXTURE_RGBA
+    dim3 threads_rgba(1, 1, 1);
+    dim3 grid_rgba(1,1,1);
+    printf("threads_rgba=(%d, %d, %d)\n", threads_rgba.x,threads_rgba.y,threads_rgba.z);
+    printf("grid_rgba=(%d, %d, %d)\n",    grid_rgba.x,grid_rgba.y,grid_rgba.z);
+    StopWatchInterface *timerRGBA = 0;
+    sdkCreateTimer(&timerRGBA);
+
+    for (int i = i0; i < numIterations; i++)
+    {
+    	if (i == 0)
+    	{
+    		checkCudaErrors(cudaDeviceSynchronize());
+    		sdkResetTimer(&timerRGBA);
+    		sdkStartTimer(&timerRGBA);
+    	}
+
+    	generate_RBGA<<<grid_rgba,threads_rgba>>> (
+    	// Parameters to generate texture tasks
+                gpu_tasks,             // struct tp_task   * gpu_tasks,
+                tp_task_size,          // int                num_tiles,          // number of tiles in task list
+    	// declare arrays in device code?
+	            gpu_texture_indices,   // int              * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
+	            gpu_num_texture_tiles, // int              * num_texture_tiles,  // number of texture tiles to process (8 elements)
+	            gpu_woi,               // int              * woi,                // x,y,width,height of the woi
+	            TILESX,                // int                width,  // <= TILESX, use for faster processing of LWIR images (should be actual + 1)
+	            TILESY,                // int                height); // <= TILESY, use for faster processing of LWIR images
+    	// Parameters for the texture generation
+	            gpu_clt ,              // float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
+	            gpu_port_offsets,      // float           * port_offsets,       // relative ports x,y offsets - just to scale differences, may be approximate
+	            texture_colors,        // int               colors,             // number of colors (3/1)
+	            (texture_colors == 1), // int               is_lwir,            // do not perform shot correction
+	            10.0,                  // float             min_shot,           // 10.0
+	            3.0,                   // float             scale_shot,         // 3.0
+	            1.5f,                  // float             diff_sigma,         // pixel value/pixel change
+	            10.0f,                 // float             diff_threshold,     // pixel value/pixel change
+	            3.0,                   // float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
+	            0.294118,              // float             weight0,            // scale for R
+	            0.117647,              // float             weight1,            // scale for B
+	            0.588235,              // float             weight2,            // scale for G
+	            1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
+	            0,                     // int               keep_weights,       // return channel weights after A in RGBA
+				dstride_textures_rbga/sizeof(float), // 	const size_t      texture_rbga_stride,     // in floats
+				gpu_textures_rbga);    // 	float           * gpu_texture_tiles)    // (number of colors +1 + ?)*16*16 rgba texture tiles
+
+    	getLastCudaError("Kernel failure");
+    	checkCudaErrors(cudaDeviceSynchronize());
+    	printf("test pass: %d\n",i);
+    }
+    sdkStopTimer(&timerRGBA);
+    float avgTimeRGBA = (float)sdkGetTimerValue(&timerRGBA) / (float)numIterations;
+    sdkDeleteTimer(&timerRGBA);
+    printf("Average Texture run time =%f ms\n",  avgTimeRGBA);
+
+	checkCudaErrors(cudaMemcpy(
+			cpu_woi,
+			gpu_woi,
+			4 * sizeof(float),
+			cudaMemcpyDeviceToHost));
+	printf("WOI x=%d, y=%d, width=%d, height=%d\n", cpu_woi[0], cpu_woi[1], cpu_woi[2], cpu_woi[3]);
+
+    int rgba_woi_width =  cpu_woi[2] * DTT_SIZE;
+    int rgba_woi_height = cpu_woi[3] * DTT_SIZE;
+
+    int rslt_rgba_size =     rgba_woi_width * rgba_woi_height * rbga_slices;
+    float * cpu_textures_rgba = (float *)malloc(rslt_rgba_size * sizeof(float));
+
+    checkCudaErrors(cudaMemcpy2D(
+    		cpu_textures_rgba,
+			rgba_width * sizeof(float),
+			gpu_textures_rbga,
+			dstride_textures_rbga,
+			rgba_width * sizeof(float),
+			rgba_height * rbga_slices,
+    		cudaMemcpyDeviceToHost));
+
+#ifndef NSAVE_TEXTURES
+    printf("Writing RBGA texture slices to %s\n",  result_textures_rgba_file);
+    writeFloatsToFile(
+    		cpu_textures_rgba,    // float *       data, // allocated array
+			rslt_rgba_size,    // int           size, // length in elements
+			result_textures_rgba_file); // 			   const char *  path) // file path
+#endif
+#ifdef DEBUG11
+    int rgba_offset = (DBG_TILE_Y - cpu_woi[1]) * DTT_SIZE * rgba_woi_width  + (DBG_TILE_X - cpu_woi[0]);
+    for (int chn = 0; chn < rbga_slices; chn++){
+    	printf("\nchn = %d\n", chn);
+    	int rgba_offset_chn = rgba_offset + chn * rgba_woi_width * rgba_woi_height;
+
+    	for (int i = 0; i < 8; i++){
+    		for (int j = 0; j < 8; j++){
+    			printf("%10.4f ", *(cpu_textures_rgba + rgba_offset_chn + i * rgba_woi_width + j));
+    		}
+    		printf("\n");
+    	}
+    }
+#endif // DEBUG11
+    free(cpu_textures_rgba);
+#endif // ifndef NOTEXTURES
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 #ifdef SAVE_CLT
     free(cpu_clt);
