@@ -512,8 +512,8 @@ int main(int argc, char **argv)
 			tile_texture_size,              // int width (floats),
 			TILESX * TILESY);               // int height);
 
-    int rgba_width =   TILESX * DTT_SIZE;
-    int rgba_height =  TILESY * DTT_SIZE;
+    int rgba_width =   (TILESX+1) * DTT_SIZE;
+    int rgba_height =  (TILESY+1) * DTT_SIZE;
     int rbga_slices =  texture_colors + 1; // 4/1
 
     gpu_textures_rbga = alloc_image_gpu(
@@ -789,7 +789,7 @@ int main(int argc, char **argv)
 		// Channel1 weight = 0.117647
 		// Channel2 weight = 0.588235
     	textures_accumulate<<<grid_texture,threads_texture>>> (
-    			0,          // int               border_tile,        // if 1 - watch for border
+//    			0,          // int               border_tile,        // if 1 - watch for border
     			(int *) 0,  //      int             * woi,                // x, y, width,height
 		        gpu_clt ,              // float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 				num_textures,          // size_t            num_texture_tiles,  // number of texture tiles to process
@@ -1008,8 +1008,10 @@ int main(int argc, char **argv)
 			cudaMemcpyDeviceToHost));
 	printf("WOI x=%d, y=%d, width=%d, height=%d\n", cpu_woi[0], cpu_woi[1], cpu_woi[2], cpu_woi[3]);
 
-    int rgba_woi_width =  cpu_woi[2] * DTT_SIZE;
-    int rgba_woi_height = cpu_woi[3] * DTT_SIZE;
+
+	// temporarily use larger array (4 pixels each size, switch to cudaMemcpy2DFromArray()
+    int rgba_woi_width =  (cpu_woi[2] + 1) * DTT_SIZE;
+    int rgba_woi_height = (cpu_woi[3] + 1)* DTT_SIZE;
 
     int rslt_rgba_size =     rgba_woi_width * rgba_woi_height * rbga_slices;
     float * cpu_textures_rgba = (float *)malloc(rslt_rgba_size * sizeof(float));
