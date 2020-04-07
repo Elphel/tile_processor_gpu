@@ -66,9 +66,9 @@
 #define DTTTEST_BLOCK_HEIGHT         16
 #define DTTTEST_BLK_STRIDE     (DTTTEST_BLOCK_WIDTH+1)
 
-extern __constant__ float idct_signs[4][4][4];
-extern __constant__ int imclt_indx9[16];
-extern __constant__ float HWINDOW2[];
+//extern __constant__ float idct_signs[4][4][4];
+//extern __constant__ int imclt_indx9[16];
+//extern __constant__ float HWINDOW2[];
 
 inline __device__ void dttii_shared_mem_nonortho(float * x0,  int inc, int dst_not_dct); // does not scale by y[0] (y[7]) by 1/sqrt[0]
 inline __device__ void dttii_shared_mem(float * x0,  int inc, int dst_not_dct);   // used in GPU_DTT24_DRV
@@ -84,7 +84,9 @@ inline __device__ void _dctii_nrecurs8 ( float x[8], float y[8]); // x,y point t
 inline __device__ void _dctiv_nrecurs8 ( float x[8], float y[8]); // x,y point to 8-element arrays each // not used
 
 // kernels (not used so far)
+#ifdef BBBB
 extern "C" __global__ void GPU_DTT24_DRV(float *dst, float *src, int src_stride, int dtt_mode);
+#endif// #ifdef BBBB
 
 //=========================== 2D functions ===============
 extern __device__ void corrUnfoldTile(

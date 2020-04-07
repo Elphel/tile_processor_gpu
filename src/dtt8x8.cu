@@ -44,7 +44,9 @@
 * This file is cpompatible with both runtime and driver API, runtime is used for development
 * with Nvidia Nsight, driver API when calling these kernels from Java
 */
+#ifndef JCUDA
 #include "dtt8x8.h"
+#endif
 
 //#define CUDART_INF_F            __int_as_float(0x7f800000)
 /*
@@ -124,7 +126,7 @@ __constant__ float HWINDOW2[] =  {0.049009f, 0.145142f, 0.235698f, 0.317197f,
 *
 * \return None
 */
-
+#ifdef BBBB
 extern "C"
 __global__ void GPU_DTT24_DRV(float *dst, float *src, int src_stride, int dtt_mode)
 {
@@ -163,6 +165,7 @@ __global__ void GPU_DTT24_DRV(float *dst, float *src, int src_stride, int dtt_mo
     for (unsigned int i = 0; i < DTT_SIZE; i++)
         dst[i * src_stride] = bl_ptr[i * DTTTEST_BLK_STRIDE];
 }
+#endif //#ifdef BBBB
 
 
 
