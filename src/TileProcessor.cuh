@@ -39,60 +39,10 @@
 // Avoiding includes in jcuda, all source files will be merged
 #pragma once
 #ifndef JCUDA
-#define THREADSX         (DTT_SIZE)
-#define NUM_CAMS                  4
-#define NUM_PAIRS                 6
-#define NUM_COLORS                3
-#define IMG_WIDTH              2592
-#define IMG_HEIGHT             1936
-#define KERNELS_HOR             164
-#define KERNELS_VERT            123
-#define KERNELS_LSTEP             4
-#define THREADS_PER_TILE          8
-#define TILES_PER_BLOCK           4
-#define CORR_THREADS_PER_TILE     8
-#define CORR_TILES_PER_BLOCK      4
-#define TEXTURE_THREADS_PER_TILE  8
-#define TEXTURE_TILES_PER_BLOCK   1
-#define IMCLT_THREADS_PER_TILE   16
-#define IMCLT_TILES_PER_BLOCK     4
-#define CORR_NTILE_SHIFT          8 // higher bits - number of a pair, other bits tile number
-#define CORR_PAIRS_MASK        0x3f// lower bits used to address correlation pair for the selected tile
-#define CORR_TEXTURE_BIT          7 // bit 7 used to request texture for the tile
-#define TASK_CORR_BITS            4
-#define TASK_TEXTURE_N_BIT        0 // Texture with North neighbor
-#define TASK_TEXTURE_E_BIT        1 // Texture with East  neighbor
-#define TASK_TEXTURE_S_BIT        2 // Texture with South neighbor
-#define TASK_TEXTURE_W_BIT        3 // Texture with West  neighbor
-#define TASK_TEXTURE_BIT          3 // bit to request texture calculation int task field of struct tp_task
-#define LIST_TEXTURE_BIT          7 // bit to request texture calculation
-#define CORR_OUT_RAD              4
-#define FAT_ZERO_WEIGHT           0.0001 // add to port weights to avoid nan
-
-#define THREADS_DYNAMIC_BITS      5 // treads in block for CDP creation of the texture list
-
-//#undef HAS_PRINTF
-#define HAS_PRINTF
-//7
-//#define DEBUG1 1
-//#define DEBUG2 1
-//#define DEBUG3 1
-//#define DEBUG4 1
-//#define DEBUG5 1
-//#define DEBUG6 1
-/*
-#define DEBUG7 1
-#define DEBUG8 1
-#define DEBUG9 1
-*/
-#define DEBUG10 1
-#define DEBUG11 1
-#define DEBUG12 1
-//#define USE_textures_gen
-#define DEBUG_OOB1 1
-#endif //#ifndef JCUDA
-
+#include "tp_defines.h"
+#endif // #ifndef JCUDA
 #include "dtt8x8.h"
+
 #define TASK_TEXTURE_BITS ((1 << TASK_TEXTURE_N_BIT) | (1 << TASK_TEXTURE_E_BIT) | (1 << TASK_TEXTURE_S_BIT) | (1 << TASK_TEXTURE_W_BIT))
 
 //#define IMCLT14
@@ -426,35 +376,6 @@ __constant__ int fold_inc[]=          {0x02feee12, 0x021eeef2};
 //__constant__ int imclt_indx[16] = {0x24,0x2c,0x34,0x3c,0x3c,0x34,0x2c,0x24,0x1c,0x22,0x21,0x20,0x20,0x21,0x22,0x23};
 //__constant__ int imclt_indx9[16] = {0x28,0x31,0x3a,0x43,0x43,0x3a,0x31,0x28,0x1f,0x16,0x0d,0x04,0x04,0x0d,0x16,0x1f};
 
-#ifdef BBBB
-__constant__ float HWINDOW2[] =  {0.049009f, 0.145142f, 0.235698f, 0.317197f,
-                                  0.386505f, 0.440961f, 0.478470f, 0.497592f};
-
-__constant__ int imclt_indx9[16] = {0x28,0x29,0x2a,0x2b,0x2b,0x2a,0x29,0x28,0x27,0x26,0x25,0x24,0x24,0x25,0x26,0x27};
-// Hope that if 2 outer indices are known at compile time there will be no integer multiplications
-__constant__ float idct_signs[4][4][4] ={
-		{ // quadrant 0, each elements corresponds to 4x4 pixel output, covering altogether 16x16
-				{ 1,-1,-1,-1},
-				{-1, 1, 1, 1},
-				{-1, 1, 1, 1},
-				{-1, 1, 1, 1}
-		},{ // quadrant 1, each elements corresponds to 4x4 pixel output, covering altogether 16x16
-				{ 1, 1, 1,-1},
-				{-1,-1,-1, 1},
-				{-1,-1,-1, 1},
-				{-1,-1,-1, 1}
-		},{ // quadrant 2, each elements corresponds to 4x4 pixel output, covering altogether 16x16
-				{ 1,-1,-1,-1},
-				{ 1,-1,-1,-1},
-				{ 1,-1,-1,-1},
-				{-1, 1, 1, 1}
-		},{ // quadrant 3, each elements corresponds to 4x4 pixel output, covering altogether 16x16
-				{ 1, 1, 1,-1},
-				{ 1, 1, 1,-1},
-				{ 1, 1, 1,-1},
-				{-1,-1,-1, 1}
-		}};
-#endif
 // LPF for sigma 0.9 each color (modify through cudaMemcpyToSymbol() or similar in Driver API
 //#ifndef NOICLT
 __constant__ float lpf_data[4][64]={
