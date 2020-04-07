@@ -1,12 +1,12 @@
 /**
  **
- ** dtt8x8.cu - CPU test code to run GPU tile processor
+ ** dtt8x8.cuh
  **
  ** Copyright (C) 2018 Elphel, Inc.
  **
  ** -----------------------------------------------------------------------------**
  **
- **  dtt8x8.cu is free software: you can redistribute it and/or modify
+ **  dtt8x8.cuh is free software: you can redistribute it and/or modify
  **  it under the terms of the GNU General Public License as published by
  **  the Free Software Foundation, either version 3 of the License, or
  **  (at your option) any later version.
@@ -30,1069 +30,1255 @@
  ** -----------------------------------------------------------------------------**
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <math.h>
-#include <cuda_runtime.h>
-#include <helper_cuda.h>
-#include <helper_functions.h>
+/**
+**************************************************************************
+* \file dtt8x8.cuh
+* \brief DCT-II, DST-II, DCT-IV and DST-IV for Complex Lapped Transform of 16x16 (stride 8)
+*        in GPU
+* This file contains building blocks for the 16x16 stride 8 COmplex Lapped Transform (CLT)
+* implementation. DTT-IV are used for forward and inverse 2D CLT, DTT-II - to convert correlation
+* results from the frequency to pixel domain. DTT-III (inverse of DTT-II) is not implemented
+* here it is used to convert convolution kernels and LPF to the frequency domain - done in
+* software.
+*
+* This file is cpompatible with both runtime and driver API, runtime is used for development
+* with Nvidia Nsight, driver API when calling these kernels from Java
+*/
+#include "dtt8x8.h"
 
-
-
-// for reading binary files
-#include <fstream>
-#include <iterator>
-#include <vector>
-
-#include "dtt8x8.cuh"
-#include "TileProcessor.cuh"
-///#include "cuda_profiler_api.h"
-//#include "cudaProfiler.h"
-
-
-float * copyalloc_kernel_gpu(float * kernel_host,
-		                int size, // size in floats
-						int full_size)
-{
-	float *kernel_gpu;
-    checkCudaErrors(cudaMalloc((void **)&kernel_gpu, full_size * sizeof(float)));
-    checkCudaErrors(cudaMemcpy( // segfault
-    		kernel_gpu,
-    		kernel_host,
-			size * sizeof(float),
-            cudaMemcpyHostToDevice));
-    return kernel_gpu;
-}
-
-float * copyalloc_kernel_gpu(float * kernel_host,
-		                int size)
-{
-	return copyalloc_kernel_gpu(kernel_host,
-            size, // size in floats
-			size);
-}
-
-
-
-float * alloccopy_from_gpu(
-		float * gpu_data,
-		float * cpu_data, // if null, will allocate
-		int size)
-{
-	if (!cpu_data) {
-		cpu_data = (float *)malloc(size*sizeof(float));
-	}
-	checkCudaErrors(cudaMemcpy( // segfault
-			cpu_data,
-			gpu_data,
-			size * sizeof(float),
-			cudaMemcpyDeviceToHost));
-
-	return cpu_data;
-}
-
-
-float * alloc_kernel_gpu(int size) // size in floats
-{
-	float *kernel_gpu;
-    checkCudaErrors(cudaMalloc((void **)&kernel_gpu, size * sizeof(float)));
-    return kernel_gpu;
-}
-
-
-float ** copyalloc_pointers_gpu(float ** gpu_pointer,
-		                int size) // number of entries (cameras)
-{
-	float ** gpu_pointer_to_gpu_pointers;
-    checkCudaErrors(cudaMalloc((void **)&gpu_pointer_to_gpu_pointers, size * sizeof(float*)));
-    checkCudaErrors(cudaMemcpy(
-    		gpu_pointer_to_gpu_pointers,
-			gpu_pointer,
-			size * sizeof(float*),
-            cudaMemcpyHostToDevice));
-    return gpu_pointer_to_gpu_pointers;
-}
-
-
-float * copyalloc_image_gpu(float * image_host,
-						size_t* dstride, // in floats !
-		                int width,
-						int height)
-{
-	float *image_gpu;
-    checkCudaErrors(cudaMallocPitch((void **)&image_gpu, dstride, width * sizeof(float), height));
-    checkCudaErrors(cudaMemcpy2D(
-    		image_gpu,
-            *dstride, //  * sizeof(float),
-			image_host,
-			width * sizeof(float), // make in 16*n?
-            width * sizeof(float),
-			height,
-			cudaMemcpyHostToDevice));
-    return image_gpu;
-}
-
-float * alloc_image_gpu(size_t* dstride, // in bytes!!
-		                int width,
-						int height)
-{
-	float *image_gpu;
-    checkCudaErrors(cudaMallocPitch((void **)&image_gpu, dstride, width * sizeof(float), height));
-    return image_gpu;
-}
-
-int readFloatsFromFile(float *       data, // allocated array
-					   const char *  path) // file path
-{
-
-    std::ifstream input(path, std::ios::binary );
-    // copies all data into buffer
-    std::vector<char> buffer((
-            std::istreambuf_iterator<char>(input)),
-            (std::istreambuf_iterator<char>()));
-    std::copy( buffer.begin(), buffer.end(), (char *) data);
-	return 0;
-}
-int writeFloatsToFile(float *       data, // allocated array
-		               int           size, // length in elements
-					   const char *  path) // file path
-{
-
-//  std::ifstream input(path, std::ios::binary );
-	std::ofstream ofile(path, std::ios::binary);
-	ofile.write((char *) data, size * sizeof(float));
-	return 0;
-}
-
-// Prepare low pass filter (64 long) to be applied to each quadrant of the CLT data
-void set_clt_lpf(
-		float * lpf,    // size*size array to be filled out
-		float   sigma,
-		const int     dct_size)
-{
-	int dct_len = dct_size * dct_size;
-	if (sigma == 0.0f) {
-		lpf[0] = 1.0f;
-		for (int i = 1; i < dct_len; i++){
-			lpf[i] = 0.0;
-		}
-	} else {
-		for (int i = 0; i < dct_size; i++){
-			for (int j = 0; j < dct_size; j++){
-				lpf[i*dct_size+j] = exp(-(i*i+j*j)/(2*sigma));
-			}
-		}
-		// normalize
-		double sum = 0;
-		for (int i = 0; i < dct_size; i++){
-			for (int j = 0; j < dct_size; j++){
-				double d = 	lpf[i*dct_size+j];
-				d*=cos(M_PI*i/(2*dct_size))*cos(M_PI*j/(2*dct_size));
-				if (i > 0) d*= 2.0;
-				if (j > 0) d*= 2.0;
-				sum +=d;
-			}
-		}
-		for (int i = 0; i< dct_len; i++){
-			lpf[i] /= sum;
-		}
-	}
-}
+//#define CUDART_INF_F            __int_as_float(0x7f800000)
+/*
+ Python code to generate constant coefficients:
+def dct_constants():
+    COSPI_1_8_SQRT2 = math.cos(math.pi/8)*math.sqrt(2.0)
+    COSPI_3_8_SQRT2 = math.cos(3*math.pi/8)*math.sqrt(2.0)
+    SQRT_2 = math.sqrt(2.0)
+    SQRT1_2 = 1/math.sqrt(2.0)
+    SQRT1_8 = 1/math.sqrt(8.0)
+    CN = [[math.cos((2*k+1)*(math.pi/(8*(2 << t))))  for k in range (2 << t)] for t in range (2)]
+    SN = [[math.sin((2*k+1)*(math.pi/(8*(2 << t))))  for k in range (2 << t)] for t in range (2)]
+    print("__constant__ float COSPI_1_8_SQRT2 = %ff;"%(COSPI_1_8_SQRT2))
+    print("__constant__ float COSPI_3_8_SQRT2 = %ff;"%(COSPI_3_8_SQRT2))
+    print("__constant__ float SQRT_2 = %ff;"%         (SQRT_2))
+    print("__constant__ float SQRT1_2 = %ff;"%        (SQRT1_2))
+    print("__constant__ float SQRT1_8 = %ff;"%        (SQRT1_8))
+    print("__constant__ float COSN1[] = {%ff,%ff};"%         (CN[0][0],CN[0][1]))
+    print("__constant__ float COSN2[] = {%ff,%ff,%ff,%ff};"% (CN[1][0],CN[1][1],CN[1][2],CN[1][3]))
+    print("__constant__ float SINN1[] = {%ff,%ff};"%         (SN[0][0],SN[0][1]))
+    print("__constant__ float SINN2[] = {%ff,%ff,%ff,%ff};"% (SN[1][0],SN[1][1],SN[1][2],SN[1][3]))
+*/
+__constant__ float COSPI_1_8_SQRT2 = 1.306563f;
+__constant__ float COSPI_3_8_SQRT2 = 0.541196f;
+__constant__ float SQRT_2 = 1.414214f;
+__constant__ float SQRT1_2 = 0.707107f;
+__constant__ float SQRT1_8 = 0.353553f;
+__constant__ float COSN1[] = {0.980785f,0.831470f};
+__constant__ float COSN2[] = {0.995185f,0.956940f,0.881921f,0.773010f};
+__constant__ float SINN1[] = {0.195090f,0.555570f};
+__constant__ float SINN2[] = {0.098017f,0.290285f,0.471397f,0.634393f};
+__constant__ int imclt_indx9[16] = {0x28,0x29,0x2a,0x2b,0x2b,0x2a,0x29,0x28,0x27,0x26,0x25,0x24,0x24,0x25,0x26,0x27};
+__constant__ float idct_signs[4][4][4] ={
+		{ // quadrant 0, each elements corresponds to 4x4 pixel output, covering altogether 16x16
+				{ 1,-1,-1,-1},
+				{-1, 1, 1, 1},
+				{-1, 1, 1, 1},
+				{-1, 1, 1, 1}
+		},{ // quadrant 1, each elements corresponds to 4x4 pixel output, covering altogether 16x16
+				{ 1, 1, 1,-1},
+				{-1,-1,-1, 1},
+				{-1,-1,-1, 1},
+				{-1,-1,-1, 1}
+		},{ // quadrant 2, each elements corresponds to 4x4 pixel output, covering altogether 16x16
+				{ 1,-1,-1,-1},
+				{ 1,-1,-1,-1},
+				{ 1,-1,-1,-1},
+				{-1, 1, 1, 1}
+		},{ // quadrant 3, each elements corresponds to 4x4 pixel output, covering altogether 16x16
+				{ 1, 1, 1,-1},
+				{ 1, 1, 1,-1},
+				{ 1, 1, 1,-1},
+				{-1,-1,-1, 1}
+		}};
+__constant__ float HWINDOW2[] =  {0.049009f, 0.145142f, 0.235698f, 0.317197f,
+                                  0.386505f, 0.440961f, 0.478470f, 0.497592f};
 
 
 
 /**
 **************************************************************************
-*  Program entry point
+*  Converts 2D image (in the GPU memory) using 8x8 DTT 8x8 tiles.
+*  Mostly for testing and profiling individual conversions
 *
-* \param argc       [IN] - Number of command-line arguments
-* \param argv       [IN] - Array of command-line arguments
+* \param dst                        [OUT] - Coefficients as 8x8 tiles
+* \param src                         [IN] - Source image of floats
+* \param src_stride                  [IN] - Source image stride
+* \param mode                        [IN] - DTT mode:
+*     0 - horizontal DCT-IV followed by vertical DCT-IV
+*     1 - horizontal DST-IV followed by vertical DCT-IV
+*     2 - horizontal DCT-IV followed by vertical DST-IV
+*     3 - horizontal DST-IV followed by vertical DST-IV
+*     4 - horizontal DCT-II followed by vertical DCT-II
+*     5 - horizontal DST-II followed by vertical DCT-II
+*     6 - horizontal DCT-II followed by vertical DST-II
+*     7 - horizontal DST-II followed by vertical DST-II
 *
-* \return Status code
+* \return None
 */
 
-
-int main(int argc, char **argv)
+extern "C"
+__global__ void GPU_DTT24_DRV(float *dst, float *src, int src_stride, int dtt_mode)
 {
-    //
-    // Sample initialization
-    //
-    printf("%s Starting...\n\n", argv[0]);
-    printf("sizeof(float*)=%d\n",(int)sizeof(float*));
+	int dtt_mode0 = dtt_mode & 1;
+	int dtt_mode1 = (dtt_mode >>1) & 1;
 
-    //initialize CUDA
-    findCudaDevice(argc, (const char **)argv);
+    __shared__ float block[DTTTEST_BLOCK_HEIGHT * DTTTEST_BLK_STRIDE];
 
-    // CLT testing
+    int OffsThreadInRow = threadIdx.y * DTT_SIZE + threadIdx.x;
+    int OffsThreadInCol = threadIdx.z * DTT_SIZE;
+    src += ((blockIdx.y * DTTTEST_BLOCK_HEIGHT + OffsThreadInCol) * src_stride) + blockIdx.x * DTTTEST_BLOCK_WIDTH + OffsThreadInRow;
+    dst += ((blockIdx.y * DTTTEST_BLOCK_HEIGHT + OffsThreadInCol) * src_stride) + blockIdx.x * DTTTEST_BLOCK_WIDTH + OffsThreadInRow;
+    float *bl_ptr = block + OffsThreadInCol * DTTTEST_BLK_STRIDE + OffsThreadInRow;
 
-    const char* kernel_file[] = {
-    		"/data_ssd/git/tile_processor_gpu/clt/main_chn0_transposed.kernel",
-			"/data_ssd/git/tile_processor_gpu/clt/main_chn1_transposed.kernel",
-			"/data_ssd/git/tile_processor_gpu/clt/main_chn2_transposed.kernel",
-			"/data_ssd/git/tile_processor_gpu/clt/main_chn3_transposed.kernel"};
+#pragma unroll
 
-    const char* kernel_offs_file[] = {
-    		"/data_ssd/git/tile_processor_gpu/clt/main_chn0_transposed.kernel_offsets",
-			"/data_ssd/git/tile_processor_gpu/clt/main_chn1_transposed.kernel_offsets",
-			"/data_ssd/git/tile_processor_gpu/clt/main_chn2_transposed.kernel_offsets",
-			"/data_ssd/git/tile_processor_gpu/clt/main_chn3_transposed.kernel_offsets"};
+    for (unsigned int i = 0; i < DTT_SIZE; i++)
+        bl_ptr[i * DTTTEST_BLK_STRIDE] = src[i * src_stride];
 
-    const char* image_files[] = {
-    		"/data_ssd/git/tile_processor_gpu/clt/main_chn0.bayer",
-			"/data_ssd/git/tile_processor_gpu/clt/main_chn1.bayer",
-			"/data_ssd/git/tile_processor_gpu/clt/main_chn2.bayer",
-			"/data_ssd/git/tile_processor_gpu/clt/main_chn3.bayer"};
-
-    const char* ports_offs_xy_file[] = {
-    		"/data_ssd/git/tile_processor_gpu/clt/main_chn0.portsxy",
-			"/data_ssd/git/tile_processor_gpu/clt/main_chn1.portsxy",
-			"/data_ssd/git/tile_processor_gpu/clt/main_chn2.portsxy",
-			"/data_ssd/git/tile_processor_gpu/clt/main_chn3.portsxy"};
-
-    const char* ports_clt_file[] = { // never referenced
-    		"/data_ssd/git/tile_processor_gpu/clt/main_chn0.clt",
-			"/data_ssd/git/tile_processor_gpu/clt/main_chn1.clt",
-			"/data_ssd/git/tile_processor_gpu/clt/main_chn2.clt",
-			"/data_ssd/git/tile_processor_gpu/clt/main_chn3.clt"};
-    const char* result_rbg_file[] = {
-    		"/data_ssd/git/tile_processor_gpu/clt/main_chn0.rbg",
-			"/data_ssd/git/tile_processor_gpu/clt/main_chn1.rbg",
-			"/data_ssd/git/tile_processor_gpu/clt/main_chn2.rbg",
-			"/data_ssd/git/tile_processor_gpu/clt/main_chn3.rbg"};
-    const char* result_corr_file = "/data_ssd/git/tile_processor_gpu/clt/main_corr.corr";
-    const char* result_textures_file =       "/data_ssd/git/tile_processor_gpu/clt/texture.rgba";
-    const char* result_textures_rgba_file = "/data_ssd/git/tile_processor_gpu/clt/texture_rgba.rgba";
-    // not yet used
-    float lpf_sigmas[3] = {0.9f, 0.9f, 0.9f}; // G, B, G
-
-    float port_offsets[NUM_CAMS][2] =  {// used only in textures to scale differences
-			{-0.5, -0.5},
-			{ 0.5, -0.5},
-			{-0.5,  0.5},
-			{ 0.5,  0.5}};
-
-    int keep_texture_weights = 1; // try with 0 also
-    int texture_colors = 3; // result will be 3+1 RGBA (for mono - 2)
-
-
-/*
-#define IMG_WIDTH    2592
-#define IMG_HEIGHT   1936
-#define NUM_CAMS        4
-#define NUM_COLORS      3
-#define KERNELS_STEP   16
-#define KERNELS_HOR   164
-#define KERNELS_VERT  123
-#define KERNEL_OFFSETS  8
-#define TILESX        324
-#define TILESY        242
-*/
-/*
-    struct tp_task {
-    	long task;
-		short ty;
-		short tx;
-		float xy[NUM_CAMS][2];
-    } ;
-*/
-    int KERN_TILES = KERNELS_HOR *  KERNELS_VERT * NUM_COLORS;
-    int KERN_SIZE =  KERN_TILES * 4 * 64;
-
-//    int CORR_SIZE = (2 * DTT_SIZE -1) * (2 * DTT_SIZE -1);
-    int CORR_SIZE = (2 * CORR_OUT_RAD + 1) * (2 * CORR_OUT_RAD + 1);
-
-
-
-    float            * host_kern_buf =  (float *)malloc(KERN_SIZE * sizeof(float));
-
-    struct tp_task     task_data [TILESX*TILESY]; // maximal length - each tile
-    int                corr_indices         [NUM_PAIRS*TILESX*TILESY];
-//    int                texture_indices      [TILESX*TILESY];
-    int                texture_indices      [TILESX*TILESYA];
-    int                cpu_woi              [4];
-
-    // host array of pointers to GPU memory
-    float            * gpu_kernels_h        [NUM_CAMS];
-    struct CltExtra  * gpu_kernel_offsets_h [NUM_CAMS];
-    float            * gpu_images_h         [NUM_CAMS];
-    float              tile_coords_h        [NUM_CAMS][TILESX * TILESY][2];
-    float            * gpu_clt_h            [NUM_CAMS];
-    float            * gpu_lpf_h            [NUM_COLORS]; // never used
-#ifndef NOICLT
-    float            * gpu_corr_images_h    [NUM_CAMS];
-#endif
-
-    float            * gpu_corrs;
-    int              * gpu_corr_indices;
-
-    float            * gpu_textures;
-    float            * gpu_textures_rbga;
-    int              * gpu_texture_indices;
-    int              * gpu_woi;
-    int              * gpu_num_texture_tiles;
-    float            * gpu_port_offsets;
-    int                num_corrs;
-    int                num_textures;
-    int                num_ports = NUM_CAMS;
-    // GPU pointers to GPU pointers to memory
-    float           ** gpu_kernels; //           [NUM_CAMS];
-    struct CltExtra ** gpu_kernel_offsets; //    [NUM_CAMS];
-    float           ** gpu_images; //            [NUM_CAMS];
-    float           ** gpu_clt;    //           [NUM_CAMS];
-    float           ** gpu_lpf;    //           [NUM_CAMS]; // never referenced
-
-    // GPU pointers to GPU memory
-//    float * gpu_tasks;
-    struct tp_task  * gpu_tasks;
-    size_t  dstride;          // in bytes !
-    size_t  dstride_rslt;     // in bytes !
-    size_t  dstride_corr;     // in bytes ! for one 2d phase correlation (padded 15x15x4 bytes)
-    size_t  dstride_textures; // in bytes ! for one rgba/ya 16x16 tile
-    size_t  dstride_textures_rbga; // in bytes ! for one rgba/ya 16x16 tile
-
-
-    float lpf_rbg[3][64]; // not used
-    for (int ncol = 0; ncol < 3; ncol++) {
-    	if (lpf_sigmas[ncol] > 0.0) {
-    		set_clt_lpf (
-    				lpf_rbg[ncol], // float * lpf,    // size*size array to be filled out
-					lpf_sigmas[ncol], // float   sigma,
-					8); // int     dct_size)
-    		gpu_lpf_h[ncol] = copyalloc_kernel_gpu(lpf_rbg[ncol], 64);
-    	} else {
-    		gpu_lpf_h[ncol] = NULL;
-    	}
+    __syncthreads();
+    // horizontal pass
+    if (dtt_mode > 3) {
+    	dttii_shared_mem                   (block + (OffsThreadInCol + threadIdx.x) * DTTTEST_BLK_STRIDE + OffsThreadInRow - threadIdx.x, 1, dtt_mode0);
+    } else {
+    	dttiv_shared_mem                   (block + (OffsThreadInCol + threadIdx.x) * DTTTEST_BLK_STRIDE + OffsThreadInRow - threadIdx.x, 1, dtt_mode0);
     }
 
-    for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
-        readFloatsFromFile(
-        		host_kern_buf, // float * data, // allocated array
-				kernel_file[ncam]); // 			   char *  path) // file path
-        gpu_kernels_h[ncam] = copyalloc_kernel_gpu(host_kern_buf, KERN_SIZE);
-
-        readFloatsFromFile(
-        		host_kern_buf, // float * data, // allocated array
-				kernel_offs_file[ncam]); // 			   char *  path) // file path
-        gpu_kernel_offsets_h[ncam] = (struct CltExtra *) copyalloc_kernel_gpu(
-        		host_kern_buf,
-				KERN_TILES * (sizeof( struct CltExtra)/sizeof(float)));
-        // will get results back
-        gpu_clt_h[ncam] = alloc_kernel_gpu(TILESY * TILESX * NUM_COLORS * 4 * DTT_SIZE * DTT_SIZE);
-        printf("Allocating GPU memory, 0x%x floats\n", (TILESY * TILESX * NUM_COLORS * 4 * DTT_SIZE * DTT_SIZE)) ;
-        // allocate result images (3x height to accommodate 3 colors
-
-        // Image is extended by 4 pixels each side to avoid checking (mclt tiles extend by 4)
-        //host array of pointers to GPU arrays
-#ifndef NOICLT
-        gpu_corr_images_h[ncam] = alloc_image_gpu(
-        		&dstride_rslt,                // size_t* dstride, // in bytes!!
-				IMG_WIDTH + DTT_SIZE,         // int width,
-				3*(IMG_HEIGHT + DTT_SIZE));   // int height);
-#endif
+    __syncthreads();
+    // vertical pass
+    if (dtt_mode > 3) {
+    	dttii_shared_mem                    (bl_ptr, DTTTEST_BLK_STRIDE, dtt_mode1);
+    } else {
+    	dttiv_shared_mem                    (bl_ptr, DTTTEST_BLK_STRIDE, dtt_mode1);
     }
-    // allocates one correlation kernel per line (15x15 floats), number of rows - number of tiles * number of pairs
-    gpu_corrs = alloc_image_gpu(
-    		&dstride_corr,                  // in bytes ! for one 2d phase correlation (padded 15x15x4 bytes)
-			CORR_SIZE,                      // int width,
-			NUM_PAIRS * TILESX * TILESY);   // int height);
-    // read channel images (assuming host_kern_buf size > image size, reusing it)
-    for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
-        readFloatsFromFile(
-        		host_kern_buf, // float * data, // allocated array
-				image_files[ncam]); // 			   char *  path) // file path
-        gpu_images_h[ncam] =  copyalloc_image_gpu(
-        		host_kern_buf, // float * image_host,
-				&dstride,      // size_t* dstride,
-				IMG_WIDTH,     // int width,
-				IMG_HEIGHT);   // int height);
-    }
-//#define DBG_TILE  (174*324 +118)
-
-    for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
-        readFloatsFromFile(
-			    (float *) &tile_coords_h[ncam],
-				ports_offs_xy_file[ncam]); // 			   char *  path) // file path
-    }
-
-    // build TP task that processes all tiles in linescan order
-    for (int ty = 0; ty < TILESY; ty++){
-        for (int tx = 0; tx < TILESX; tx++){
-            int nt = ty * TILESX + tx;
-            task_data[nt].task = 0xf | (((1 << NUM_PAIRS)-1) << TASK_CORR_BITS);
-            task_data[nt].txy = tx + (ty << 16);
-            for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
-                task_data[nt].xy[ncam][0] = tile_coords_h[ncam][nt][0];
-                task_data[nt].xy[ncam][1] = tile_coords_h[ncam][nt][1];
-            }
-        }
-    }
-
-    int tp_task_size =  sizeof(task_data)/sizeof(struct tp_task);
-
-
-#ifdef DBG0
-//#define NUM_TEST_TILES 128
-#define NUM_TEST_TILES 1
-    for (int t = 0; t < NUM_TEST_TILES; t++) {
-    	task_data[t].task = 1;
-    	task_data[t].txy = ((DBG_TILE + t) - 324* ((DBG_TILE + t) / 324)) + (((DBG_TILE + t) / 324)) << 16;
-    	int nt = task_data[t].ty * TILESX + task_data[t].tx;
-
-    	for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
-    		task_data[t].xy[ncam][0] = tile_coords_h[ncam][nt][0];
-    		task_data[t].xy[ncam][1] = tile_coords_h[ncam][nt][1];
-    	}
-    }
-    tp_task_size =  NUM_TEST_TILES; // sizeof(task_data)/sizeof(float);
-
-#endif
-
-    // segfault in the next
-    gpu_tasks = (struct tp_task  *) copyalloc_kernel_gpu((float * ) &task_data, tp_task_size * (sizeof(struct tp_task)/sizeof(float)));
-
-    // build corr_indices
-    num_corrs = 0;
-    for (int ty = 0; ty < TILESY; ty++){
-    	for (int tx = 0; tx < TILESX; tx++){
-    		int nt = ty * TILESX + tx;
-    		int cm = (task_data[nt].task >> TASK_CORR_BITS) & ((1 << NUM_PAIRS)-1);
-    		if (cm){
-    			for (int b = 0; b < NUM_PAIRS; b++) if ((cm & (1 << b)) != 0) {
-    				corr_indices[num_corrs++] = (nt << CORR_NTILE_SHIFT) | b;
-    			}
-    		}
-    	}
-    }
-    // num_corrs now has the total number of correlations
-    // copy corr_indices to gpu
-//    gpu_corr_indices = (int  *) copyalloc_kernel_gpu((float * ) corr_indices, num_corrs);
-    gpu_corr_indices = (int  *) copyalloc_kernel_gpu(
-    		(float * ) corr_indices,
-			num_corrs,
-			NUM_PAIRS * TILESX * TILESY);
-
-    // build texture_indices
-    num_textures = 0;
-    for (int ty = 0; ty < TILESY; ty++){
-    	for (int tx = 0; tx < TILESX; tx++){
-    		int nt = ty * TILESX + tx;
-//    		int cm = (task_data[nt].task >> TASK_TEXTURE_BIT) & 1;
-    		int cm = task_data[nt].task & TASK_TEXTURE_BITS;
-    		if (cm){
-    			texture_indices[num_textures++] = (nt << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT);
-    		}
-    	}
-    }
-    // num_textures now has the total number of textures
-    // copy corr_indices to gpu
-//  gpu_texture_indices = (int  *) copyalloc_kernel_gpu((float * ) texture_indices, num_textures);
-    gpu_texture_indices = (int  *) copyalloc_kernel_gpu(
-    		(float * ) texture_indices,
-			num_textures,
-			TILESX * TILESYA); // number of rows - multiple of 4
-    // just allocate
-    checkCudaErrors(cudaMalloc((void **)&gpu_woi,               4 * sizeof(float)));
-    checkCudaErrors(cudaMalloc((void **)&gpu_num_texture_tiles, 8 * sizeof(float))); // for each subsequence - number of non-border,
-    // number of border tiles
-
-    // copy port indices to gpu
-    gpu_port_offsets = (float *) copyalloc_kernel_gpu((float * ) port_offsets, num_ports * 2);
-
-
-
-//    int keep_texture_weights = 1; // try with 0 also
-//    int texture_colors = 3; // result will be 3+1 RGBA (for mono - 2)
-
-//		double [][] rgba = new double[numcol + 1 + (keep_weights?(ports + numcol + 1):0)][];
-
-    int tile_texture_size = (texture_colors + 1 + (keep_texture_weights? (NUM_CAMS + texture_colors + 1): 0)) *256;
-
-    gpu_textures = alloc_image_gpu(
-    		&dstride_textures,              // in bytes ! for one rgba/ya 16x16 tile
-			tile_texture_size,              // int width (floats),
-			TILESX * TILESY);               // int height);
-
-    int rgba_width =   (TILESX+1) * DTT_SIZE;
-    int rgba_height =  (TILESY+1) * DTT_SIZE;
-    int rbga_slices =  texture_colors + 1; // 4/1
-
-    gpu_textures_rbga = alloc_image_gpu(
-    		&dstride_textures_rbga,              // in bytes ! for one rgba/ya 16x16 tile
-			rgba_width,              // int width (floats),
-			rgba_height * rbga_slices);               // int height);
-
-
-    // Now copy arrays of per-camera pointers to GPU memory to GPU itself
-
-    gpu_kernels =        copyalloc_pointers_gpu (gpu_kernels_h,     NUM_CAMS);
-    gpu_kernel_offsets = (struct CltExtra **) copyalloc_pointers_gpu ((float **) gpu_kernel_offsets_h, NUM_CAMS);
-    gpu_images =         copyalloc_pointers_gpu (gpu_images_h,      NUM_CAMS);
-    gpu_clt =            copyalloc_pointers_gpu (gpu_clt_h,         NUM_CAMS);
-//    gpu_corr_images =    copyalloc_pointers_gpu (gpu_corr_images_h, NUM_CAMS);
-
-    //create and start CUDA timer
-    StopWatchInterface *timerTP = 0;
-    sdkCreateTimer(&timerTP);
-
-
-    dim3 threads_tp(THREADSX, TILES_PER_BLOCK, 1);
-    dim3 grid_tp((tp_task_size + TILES_PER_BLOCK -1 )/TILES_PER_BLOCK, 1);
-    printf("threads_tp=(%d, %d, %d)\n",threads_tp.x,threads_tp.y,threads_tp.z);
-    printf("grid_tp=   (%d, %d, %d)\n",grid_tp.x,   grid_tp.y,   grid_tp.z);
-
-#ifdef DBG_TILE
-    const int numIterations = 1; //0;
-    const int i0 =  0; // -1;
-#else
-    const int numIterations = 10; // 0; //0;
-    const int i0 = -1; // 0; // -1;
-#endif
-    cudaFuncSetCacheConfig(convert_correct_tiles, cudaFuncCachePreferShared);
-///    cudaProfilerStart();
-    float ** fgpu_kernel_offsets = (float **) gpu_kernel_offsets; //    [NUM_CAMS];
-
-    for (int i = i0; i < numIterations; i++)
-    {
-        if (i == 0)
-        {
-            checkCudaErrors(cudaDeviceSynchronize());
-            sdkResetTimer(&timerTP);
-            sdkStartTimer(&timerTP);
-        }
-
-        convert_correct_tiles<<<grid_tp,threads_tp>>>(
-        		fgpu_kernel_offsets,    // struct CltExtra      ** gpu_kernel_offsets,
-				gpu_kernels,           // 		float           ** gpu_kernels,
-				gpu_images,            // 		float           ** gpu_images,
-				gpu_tasks,             // 		struct tp_task  * gpu_tasks,
-				gpu_clt,               //       float           ** gpu_clt,            // [NUM_CAMS][TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
-				dstride/sizeof(float), // 		size_t            dstride, // for gpu_images
-				tp_task_size,          // 		int               num_tiles) // number of tiles in task
-				0); // 7); // 0); // 7);                    //       int               lpf_mask)            // apply lpf to colors : bit 0 - red, bit 1 - blue, bit2 - green
-
-
-        getLastCudaError("Kernel execution failed");
-        checkCudaErrors(cudaDeviceSynchronize());
-        printf("%d\n",i);
-    }
-//    checkCudaErrors(cudaDeviceSynchronize());
-    sdkStopTimer(&timerTP);
-    float avgTime = (float)sdkGetTimerValue(&timerTP) / (float)numIterations;
-    sdkDeleteTimer(&timerTP);
-    printf("Run time =%f ms\n",  avgTime);
-
-
-#ifdef SAVE_CLT
-    int rslt_size = (TILESY * TILESX * NUM_COLORS * 4 * DTT_SIZE * DTT_SIZE);
-    float * cpu_clt = (float *)malloc(rslt_size*sizeof(float));
-    for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
-    	checkCudaErrors(cudaMemcpy( // segfault
-    			cpu_clt,
-				gpu_clt_h[ncam],
-				rslt_size * sizeof(float),
-    			cudaMemcpyDeviceToHost));
-#ifndef DBG_TILE
-        printf("Writing CLT data to %s\n",  ports_clt_file[ncam]);
-    	writeFloatsToFile(cpu_clt, // float *       data, // allocated array
-    			rslt_size, // int           size, // length in elements
-				ports_clt_file[ncam]); // 			   const char *  path) // file path
-#endif
-    }
-#endif
-
-#ifdef TEST_IMCLT
-     {
-    	// testing imclt
-    	dim3 threads_imclt(IMCLT_THREADS_PER_TILE, IMCLT_TILES_PER_BLOCK, 1);
-    	dim3 grid_imclt(1,1,1);
-    	printf("threads_imclt=(%d, %d, %d)\n",threads_imclt.x,threads_imclt.y,threads_imclt.z);
-    	printf("grid_imclt=   (%d, %d, %d)\n",grid_imclt.x,   grid_imclt.y,   grid_imclt.z);
-    	for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
-    		test_imclt<<<grid_imclt,threads_imclt>>>(
-    				gpu_clt_h[ncam], // ncam]); //                //       float           ** gpu_clt,            // [NUM_CAMS][TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
-					ncam);                                        // int             ncam); // just for debug print
-    	}
-    	getLastCudaError("Kernel execution failed");
-    	checkCudaErrors(cudaDeviceSynchronize());
-    	printf("test_imclt() DONE\n");
-    }
-#endif
-
-
-#ifndef NOICLT
-    // testing imclt
-    dim3 threads_imclt(IMCLT_THREADS_PER_TILE, IMCLT_TILES_PER_BLOCK, 1);
-    printf("threads_imclt=(%d, %d, %d)\n",threads_imclt.x,threads_imclt.y,threads_imclt.z);
-    StopWatchInterface *timerIMCLT = 0;
-    sdkCreateTimer(&timerIMCLT);
-
-    for (int i = i0; i < numIterations; i++)
-    {
-    	if (i == 0)
-    	{
-    		checkCudaErrors(cudaDeviceSynchronize());
-    		sdkResetTimer(&timerIMCLT);
-    		sdkStartTimer(&timerIMCLT);
-    	}
-
-    	for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
-    		for (int color = 0; color < NUM_COLORS; color++) {
-#ifdef IMCLT14
-    			for (int v_offs = 0; v_offs < 1; v_offs++){     // temporarily for debugging
-    				for (int h_offs = 0; h_offs < 1; h_offs++){ // temporarily for debugging
-#else
-    	    			for (int v_offs = 0; v_offs < 2; v_offs++){
-    	    				for (int h_offs = 0; h_offs < 2; h_offs++){
-#endif
-    					int tilesy_half = (TILESY + (v_offs ^ 1)) >> 1;
-    					int tilesx_half = (TILESX + (h_offs ^ 1)) >> 1;
-    					int tiles_in_pass = tilesy_half * tilesx_half;
-    					dim3 grid_imclt((tiles_in_pass + IMCLT_TILES_PER_BLOCK-1) / IMCLT_TILES_PER_BLOCK,1,1);
-    					//    				printf("grid_imclt=   (%d, %d, %d)\n",grid_imclt.x,   grid_imclt.y,   grid_imclt.z);
-    					imclt_rbg<<<grid_imclt,threads_imclt>>>(
-    							gpu_clt_h[ncam], // float           * gpu_clt,            // [TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
-								gpu_corr_images_h[ncam], // float           * gpu_rbg,            // WIDTH, 3 * HEIGHT
-								color, // int               color,
-								v_offs, // int               v_offset,
-								h_offs, // int               h_offset,
-								dstride_rslt/sizeof(float));            //const size_t      dstride);            // in floats (pixels)
-    				}
-    			}
-    		}
-    	}
-    	getLastCudaError("Kernel failure");
-    	checkCudaErrors(cudaDeviceSynchronize());
-    	printf("test pass: %d\n",i);
-    }
-
-    sdkStopTimer(&timerIMCLT);
-    float avgTimeIMCLT = (float)sdkGetTimerValue(&timerIMCLT) / (float)numIterations;
-    sdkDeleteTimer(&timerIMCLT);
-    printf("Average IMCLT run time =%f ms\n",  avgTimeIMCLT);
-
-    int rslt_img_size =       NUM_COLORS * (IMG_HEIGHT + DTT_SIZE) * (IMG_WIDTH + DTT_SIZE);
-    float * cpu_corr_image = (float *)malloc(rslt_img_size * sizeof(float));
-
-
-
-    for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
-    	checkCudaErrors(cudaMemcpy2D( // segfault
-    			cpu_corr_image,
-				(IMG_WIDTH + DTT_SIZE) * sizeof(float),
-				gpu_corr_images_h[ncam],
-				dstride_rslt,
-				(IMG_WIDTH + DTT_SIZE) * sizeof(float),
-				3* (IMG_HEIGHT + DTT_SIZE),
-    			cudaMemcpyDeviceToHost));
-
-#ifndef DBG_TILE
-        printf("Writing RBG data to %s\n",  result_rbg_file[ncam]);
-    	writeFloatsToFile( // will have margins
-    			cpu_corr_image, // float *       data, // allocated array
-				rslt_img_size, // int           size, // length in elements
-				result_rbg_file[ncam]); // 			   const char *  path) // file path
-#endif
-    }
-
-    free(cpu_corr_image);
-#endif
-
-
-#ifndef NOCORR
-//    cudaProfilerStart();
-    // testing corr
-    dim3 threads_corr(CORR_THREADS_PER_TILE, CORR_TILES_PER_BLOCK, 1);
-    printf("threads_corr=(%d, %d, %d)\n",threads_corr.x,threads_corr.y,threads_corr.z);
-    StopWatchInterface *timerCORR = 0;
-    sdkCreateTimer(&timerCORR);
-
-    for (int i = i0; i < numIterations; i++)
-    {
-    	if (i == 0)
-    	{
-    		checkCudaErrors(cudaDeviceSynchronize());
-    		sdkResetTimer(&timerCORR);
-    		sdkStartTimer(&timerCORR);
-    	}
-
-        dim3 grid_corr((num_corrs + CORR_TILES_PER_BLOCK-1) / CORR_TILES_PER_BLOCK,1,1);
-        correlate2D<<<grid_corr,threads_corr>>>(
-		gpu_clt,   // float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
-		3,         // int               colors,             // number of colors (3/1)
-		0.25,      // float             scale0,             // scale for R
-		0.25,      // float             scale1,             // scale for B
-		0.5,       // float             scale2,             // scale for G
-		30.0,      // float             fat_zero,           // here - absolute
-		num_corrs, // size_t            num_corr_tiles,     // number of correlation tiles to process
-		gpu_corr_indices, //  int             * gpu_corr_indices,   // packed tile+pair
-		dstride_corr/sizeof(float), // const size_t      corr_stride,        // in floats
-		CORR_OUT_RAD, // int               corr_radius,        // radius of the output correlation (7 for 15x15)
-		gpu_corrs); // float           * gpu_corrs);          // correlation output data
-    	getLastCudaError("Kernel failure");
-    	checkCudaErrors(cudaDeviceSynchronize());
-    	printf("test pass: %d\n",i);
-    }
-
-    sdkStopTimer(&timerCORR);
-    float avgTimeCORR = (float)sdkGetTimerValue(&timerCORR) / (float)numIterations;
-    sdkDeleteTimer(&timerCORR);
-    printf("Average CORR run time =%f ms\n",  avgTimeCORR);
-
-    int corr_size =        2 * CORR_OUT_RAD + 1;
-    int rslt_corr_size =   num_corrs * corr_size * corr_size;
-    float * cpu_corr = (float *)malloc(rslt_corr_size * sizeof(float));
-
-
-
-    checkCudaErrors(cudaMemcpy2D(
-    		cpu_corr,
-			(corr_size * corr_size) * sizeof(float),
-			gpu_corrs,
-			dstride_corr,
-			(corr_size * corr_size) * sizeof(float),
-			num_corrs,
-    		cudaMemcpyDeviceToHost));
-
-#ifndef NSAVE_CORR
-    		printf("Writing phase correlation data to %s\n",  result_corr_file);
-    		writeFloatsToFile(
-    				cpu_corr,    // float *       data, // allocated array
-					rslt_corr_size,    // int           size, // length in elements
-					result_corr_file); // 			   const char *  path) // file path
-#endif
-    		free(cpu_corr);
-#endif // ifndef NOCORR
-
-
-// -----------------
-
-#ifndef NOTEXTURES
-//    cudaProfilerStart();
-    // testing textures
-    dim3 threads_texture(TEXTURE_THREADS_PER_TILE, NUM_CAMS, 1); // TEXTURE_TILES_PER_BLOCK, 1);
-    dim3 grid_texture((num_textures + TEXTURE_TILES_PER_BLOCK-1) / TEXTURE_TILES_PER_BLOCK,1,1);
-    printf("threads_texture=(%d, %d, %d)\n",threads_texture.x,threads_texture.y,threads_texture.z);
-    printf("grid_texture=(%d, %d, %d)\n",grid_texture.x,grid_texture.y,grid_texture.z);
-    StopWatchInterface *timerTEXTURE = 0;
-    sdkCreateTimer(&timerTEXTURE);
-
-    for (int i = i0; i < numIterations; i++)
-    {
-    	if (i == 0)
-    	{
-    		checkCudaErrors(cudaDeviceSynchronize());
-    		sdkResetTimer(&timerTEXTURE);
-    		sdkStartTimer(&timerTEXTURE);
-    	}
-
-		// Channel0 weight = 0.294118
-		// Channel1 weight = 0.117647
-		// Channel2 weight = 0.588235
-    	textures_accumulate<<<grid_texture,threads_texture>>> (
-//    			0,          // int               border_tile,        // if 1 - watch for border
-    			(int *) 0,  //      int             * woi,                // x, y, width,height
-		        gpu_clt ,              // float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
-				num_textures,          // size_t            num_texture_tiles,  // number of texture tiles to process
-				gpu_texture_indices,   // int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
-				gpu_port_offsets,      // float           * port_offsets,       // relative ports x,y offsets - just to scale differences, may be approximate
-				texture_colors,        // int               colors,             // number of colors (3/1)
-				(texture_colors == 1), // int               is_lwir,            // do not perform shot correction
-				10.0,                  // float             min_shot,           // 10.0
-				3.0,                   // float             scale_shot,         // 3.0
-				1.5f,                  // float             diff_sigma,         // pixel value/pixel change
-				10.0f,                 // float             diff_threshold,     // pixel value/pixel change
-				3.0,                   // float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
-				0.294118,              // float             weight0,            // scale for R
-				0.117647,              // float             weight1,            // scale for B
-				0.588235,              // float             weight2,            // scale for G
-				1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
-				keep_texture_weights,  // int               keep_weights,       // return channel weights after A in RGBA
-    	// combining both non-overlap and overlap (each calculated if pointer is not null )
-    			0, // const size_t      texture_rbg_stride, // in floats
-    			(float *) 0, // float           * gpu_texture_rbg,     // (number of colors +1 + ?)*16*16 rgba texture tiles
-				dstride_textures/sizeof(float), // const size_t      texture_stride,     // in floats (now 256*4 = 1024)
-				gpu_textures);    // float           * gpu_texture_tiles);  // 4*16*16 rgba texture tiles
-    	getLastCudaError("Kernel failure");
-    	checkCudaErrors(cudaDeviceSynchronize());
-    	printf("test pass: %d\n",i);
-    }
-///	cudaProfilerStop();
-    sdkStopTimer(&timerTEXTURE);
-    float avgTimeTEXTURES = (float)sdkGetTimerValue(&timerTEXTURE) / (float)numIterations;
-    sdkDeleteTimer(&timerTEXTURE);
-    printf("Average Texture run time =%f ms\n",  avgTimeTEXTURES);
-
-    int rslt_texture_size =   num_textures * tile_texture_size;
-    float * cpu_textures = (float *)malloc(rslt_texture_size * sizeof(float));
-
-
-
-    checkCudaErrors(cudaMemcpy2D(
-    		cpu_textures,
-			tile_texture_size * sizeof(float),
-			gpu_textures,
-			dstride_textures,
-			tile_texture_size * sizeof(float),
-			num_textures,
-    		cudaMemcpyDeviceToHost));
-
-#ifndef NSAVE_TEXTURES
-    		printf("Writing phase texture data to %s\n",  result_textures_file);
-    		writeFloatsToFile(
-    				cpu_textures,    // float *       data, // allocated array
-					rslt_texture_size,    // int           size, // length in elements
-					result_textures_file); // 			   const char *  path) // file path
-
-//DBG_TILE
-#ifdef DEBUG10
-    		int texture_offset = DBG_TILE * tile_texture_size;
-    		int chn = 0;
-    		for (int i = 0; i < tile_texture_size; i++){
-    			if ((i % 256) == 0){
-    				printf("\nchn = %d\n", chn++);
-    			}
-    			printf("%10.4f", *(cpu_textures + texture_offset + i));
-    			if (((i + 1) % 16) == 0){
-    				printf("\n");
-    			} else {
-    				printf(" ");
-    			}
-    		}
-//    int tile_texture_size = (texture_colors + 1 + (keep_texture_weights? (NUM_CAMS + texture_colors + 1): 0)) *256;
-#endif // DEBUG9
-#endif
-    		free(cpu_textures);
-#endif // ifndef NOTEXTURES
-
-
-#define GEN_TEXTURE_LIST
-#ifdef  GEN_TEXTURE_LIST
-    		dim3 threads_list(1,1, 1); // TEXTURE_TILES_PER_BLOCK, 1);
-    		dim3 grid_list   (1,1,1);
-    		printf("threads_list=(%d, %d, %d)\n",threads_list.x,threads_list.y,threads_list.z);
-    		printf("grid_list=(%d, %d, %d)\n",grid_list.x,grid_list.y,grid_list.z);
-    		StopWatchInterface *timerTEXTURELIST = 0;
-    		sdkCreateTimer(&timerTEXTURELIST);
-    		for (int i = i0; i < numIterations; i++)
-    		{
-    			if (i == 0)
-    			{
-    				checkCudaErrors(cudaDeviceSynchronize());
-    				sdkResetTimer(&timerTEXTURELIST);
-    				sdkStartTimer(&timerTEXTURELIST);
-    			}
-
-    			prepare_texture_list<<<grid_list,threads_list>>> (
-    					gpu_tasks,             // struct tp_task   * gpu_tasks,
-						tp_task_size,          // int                num_tiles,          // number of tiles in task list
-						gpu_texture_indices,   // int              * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
-						gpu_num_texture_tiles, // int              * num_texture_tiles,  // number of texture tiles to process (8 elements)
-						gpu_woi,               // int              * woi,                // x,y,width,height of the woi
-						TILESX,                // int                width,  // <= TILESX, use for faster processing of LWIR images (should be actual + 1)
-						TILESY);               // int                height); // <= TILESY, use for faster processing of LWIR images
-
-    			getLastCudaError("Kernel failure");
-    			checkCudaErrors(cudaDeviceSynchronize());
-    			printf("test pass: %d\n",i);
-    		}
-    		///	cudaProfilerStop();
-    		sdkStopTimer(&timerTEXTURELIST);
-    		float avgTimeTEXTURESLIST = (float)sdkGetTimerValue(&timerTEXTURELIST) / (float)numIterations;
-    		sdkDeleteTimer(&timerTEXTURELIST);
-    		printf("Average TextureList run time =%f ms\n",  avgTimeTEXTURESLIST);
-
-    		int cpu_num_texture_tiles[8];
-    		checkCudaErrors(cudaMemcpy(
-    				cpu_woi,
-					gpu_woi,
-					4 * sizeof(float),
-					cudaMemcpyDeviceToHost));
-    		printf("WOI x=%d, y=%d, width=%d, height=%d\n", cpu_woi[0], cpu_woi[1], cpu_woi[2], cpu_woi[3]);
-    		checkCudaErrors(cudaMemcpy(
-    				cpu_num_texture_tiles,
-					gpu_num_texture_tiles,
-					8 * sizeof(float), // 8 sequences (0,2,4,6 - non-border, growing up;
-					//1,3,5,7 - border, growing down from the end of the corresponding non-border buffers
-					cudaMemcpyDeviceToHost));
-    		printf("cpu_num_texture_tiles=(%d(%d), %d(%d), %d(%d), %d(%d) -> %d tp_task_size=%d)\n",
-    				cpu_num_texture_tiles[0], cpu_num_texture_tiles[1],
-					cpu_num_texture_tiles[2], cpu_num_texture_tiles[3],
-					cpu_num_texture_tiles[4], cpu_num_texture_tiles[5],
-					cpu_num_texture_tiles[6], cpu_num_texture_tiles[7],
-    				cpu_num_texture_tiles[0] + cpu_num_texture_tiles[1] +
-					cpu_num_texture_tiles[2] + cpu_num_texture_tiles[3] +
-					cpu_num_texture_tiles[4] + cpu_num_texture_tiles[5] +
-					cpu_num_texture_tiles[6] + cpu_num_texture_tiles[7],
-					tp_task_size
-					);
-    		for (int q = 0; q < 4; q++) {
-    			checkCudaErrors(cudaMemcpy(
-    					texture_indices  + q * TILESX * (TILESYA >> 2),
-						gpu_texture_indices  + q * TILESX * (TILESYA >> 2),
-						cpu_num_texture_tiles[q] * sizeof(float), // change to cpu_num_texture_tiles when ready
-						cudaMemcpyDeviceToHost));
-    		}
-    		for (int q = 0; q < 4; q++) {
-        		printf("%d: %3x:%3x %3x:%3x %3x:%3x %3x:%3x %3x:%3x %3x:%3x %3x:%3x %3x:%3x \n",q,
-        				(texture_indices[q * TILESX * (TILESYA >> 2) + 0] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 0] >> 8) % TILESX,
-        				(texture_indices[q * TILESX * (TILESYA >> 2) + 1] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 1] >> 8) % TILESX,
-        				(texture_indices[q * TILESX * (TILESYA >> 2) + 2] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 2] >> 8) % TILESX,
-        				(texture_indices[q * TILESX * (TILESYA >> 2) + 3] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 3] >> 8) % TILESX,
-        				(texture_indices[q * TILESX * (TILESYA >> 2) + 4] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 4] >> 8) % TILESX,
-        				(texture_indices[q * TILESX * (TILESYA >> 2) + 5] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 5] >> 8) % TILESX,
-        				(texture_indices[q * TILESX * (TILESYA >> 2) + 6] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 6] >> 8) % TILESX,
-        				(texture_indices[q * TILESX * (TILESYA >> 2) + 7] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 7] >> 8) % TILESX);
-    		}
-#endif //GEN_TEXTURE_LIST
-
-
-
-#ifndef NOTEXTURE_RGBA
-    dim3 threads_rgba(1, 1, 1);
-    dim3 grid_rgba(1,1,1);
-    printf("threads_rgba=(%d, %d, %d)\n", threads_rgba.x,threads_rgba.y,threads_rgba.z);
-    printf("grid_rgba=(%d, %d, %d)\n",    grid_rgba.x,grid_rgba.y,grid_rgba.z);
-    StopWatchInterface *timerRGBA = 0;
-    sdkCreateTimer(&timerRGBA);
-
-    for (int i = i0; i < numIterations; i++)
-    {
-    	if (i == 0)
-    	{
-    		checkCudaErrors(cudaDeviceSynchronize());
-    		sdkResetTimer(&timerRGBA);
-    		sdkStartTimer(&timerRGBA);
-    	}
-
-    	generate_RBGA<<<grid_rgba,threads_rgba>>> (
-    	// Parameters to generate texture tasks
-                gpu_tasks,             // struct tp_task   * gpu_tasks,
-                tp_task_size,          // int                num_tiles,          // number of tiles in task list
-    	// declare arrays in device code?
-	            gpu_texture_indices,   // int              * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
-	            gpu_num_texture_tiles, // int              * num_texture_tiles,  // number of texture tiles to process (8 elements)
-	            gpu_woi,               // int              * woi,                // x,y,width,height of the woi
-	            TILESX,                // int                width,  // <= TILESX, use for faster processing of LWIR images (should be actual + 1)
-	            TILESY,                // int                height); // <= TILESY, use for faster processing of LWIR images
-    	// Parameters for the texture generation
-	            gpu_clt ,              // float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
-	            gpu_port_offsets,      // float           * port_offsets,       // relative ports x,y offsets - just to scale differences, may be approximate
-	            texture_colors,        // int               colors,             // number of colors (3/1)
-	            (texture_colors == 1), // int               is_lwir,            // do not perform shot correction
-	            10.0,                  // float             min_shot,           // 10.0
-	            3.0,                   // float             scale_shot,         // 3.0
-	            1.5f,                  // float             diff_sigma,         // pixel value/pixel change
-	            10.0f,                 // float             diff_threshold,     // pixel value/pixel change
-	            3.0,                   // float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
-	            0.294118,              // float             weight0,            // scale for R
-	            0.117647,              // float             weight1,            // scale for B
-	            0.588235,              // float             weight2,            // scale for G
-	            1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
-	            0,                     // int               keep_weights,       // return channel weights after A in RGBA
-				dstride_textures_rbga/sizeof(float), // 	const size_t      texture_rbga_stride,     // in floats
-				gpu_textures_rbga);    // 	float           * gpu_texture_tiles)    // (number of colors +1 + ?)*16*16 rgba texture tiles
-
-    	getLastCudaError("Kernel failure");
-    	checkCudaErrors(cudaDeviceSynchronize());
-    	printf("test pass: %d\n",i);
-    }
-    sdkStopTimer(&timerRGBA);
-    float avgTimeRGBA = (float)sdkGetTimerValue(&timerRGBA) / (float)numIterations;
-    sdkDeleteTimer(&timerRGBA);
-    printf("Average Texture run time =%f ms\n",  avgTimeRGBA);
-
-	checkCudaErrors(cudaMemcpy(
-			cpu_woi,
-			gpu_woi,
-			4 * sizeof(float),
-			cudaMemcpyDeviceToHost));
-	printf("WOI x=%d, y=%d, width=%d, height=%d\n", cpu_woi[0], cpu_woi[1], cpu_woi[2], cpu_woi[3]);
-
-
-	// temporarily use larger array (4 pixels each size, switch to cudaMemcpy2DFromArray()
-    int rgba_woi_width =  (cpu_woi[2] + 1) * DTT_SIZE;
-    int rgba_woi_height = (cpu_woi[3] + 1)* DTT_SIZE;
-
-    int rslt_rgba_size =     rgba_woi_width * rgba_woi_height * rbga_slices;
-    float * cpu_textures_rgba = (float *)malloc(rslt_rgba_size * sizeof(float));
-
-    checkCudaErrors(cudaMemcpy2D(
-    		cpu_textures_rgba,
-			rgba_width * sizeof(float),
-			gpu_textures_rbga,
-			dstride_textures_rbga,
-			rgba_width * sizeof(float),
-			rgba_height * rbga_slices,
-    		cudaMemcpyDeviceToHost));
-
-#ifndef NSAVE_TEXTURES
-    printf("Writing RBGA texture slices to %s\n",  result_textures_rgba_file);
-    writeFloatsToFile(
-    		cpu_textures_rgba,    // float *       data, // allocated array
-			rslt_rgba_size,    // int           size, // length in elements
-			result_textures_rgba_file); // 			   const char *  path) // file path
-#endif
-#ifdef DEBUG11
-    int rgba_offset = (DBG_TILE_Y - cpu_woi[1]) * DTT_SIZE * rgba_woi_width  + (DBG_TILE_X - cpu_woi[0]);
-    for (int chn = 0; chn < rbga_slices; chn++){
-    	printf("\nchn = %d\n", chn);
-    	int rgba_offset_chn = rgba_offset + chn * rgba_woi_width * rgba_woi_height;
-
-    	for (int i = 0; i < 8; i++){
-    		for (int j = 0; j < 8; j++){
-    			printf("%10.4f ", *(cpu_textures_rgba + rgba_offset_chn + i * rgba_woi_width + j));
-    		}
-    		printf("\n");
-    	}
-    }
-#endif // DEBUG11
-    free(cpu_textures_rgba);
-#endif // ifndef NOTEXTURES
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#ifdef SAVE_CLT
-    free(cpu_clt);
-#endif
-
-    free (host_kern_buf);
-    // TODO: move somewhere when all is done
-    for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
-    	checkCudaErrors(cudaFree(gpu_kernels_h[ncam]));
-    	checkCudaErrors(cudaFree(gpu_kernel_offsets_h[ncam]));
-    	checkCudaErrors(cudaFree(gpu_images_h[ncam]));
-    	checkCudaErrors(cudaFree(gpu_clt_h[ncam]));
-#ifndef NOICLT
-    	checkCudaErrors(cudaFree(gpu_corr_images_h[ncam]));
-#endif
-    }
-	checkCudaErrors(cudaFree(gpu_tasks));
-	checkCudaErrors(cudaFree(gpu_kernels));
-	checkCudaErrors(cudaFree(gpu_kernel_offsets));
-	checkCudaErrors(cudaFree(gpu_images));
-	checkCudaErrors(cudaFree(gpu_clt));
-//	checkCudaErrors(cudaFree(gpu_corr_images));
-	checkCudaErrors(cudaFree(gpu_corrs));
-	checkCudaErrors(cudaFree(gpu_corr_indices));
-	checkCudaErrors(cudaFree(gpu_texture_indices));
-	checkCudaErrors(cudaFree(gpu_port_offsets));
-	checkCudaErrors(cudaFree(gpu_textures));
-	checkCudaErrors(cudaFree(gpu_textures_rbga));
-	checkCudaErrors(cudaFree(gpu_woi));
-	checkCudaErrors(cudaFree(gpu_num_texture_tiles));
-
-
-
-	exit(0);
+    __syncthreads();
+    for (unsigned int i = 0; i < DTT_SIZE; i++)
+        dst[i * src_stride] = bl_ptr[i * DTTTEST_BLK_STRIDE];
 }
+
+
+
+inline __device__ void _dctiv_nrecurs8( float x[8], float y[8]) // x,y point to 8-element arrays each
+{
+	float u00=            ( COSN2[0] * x[0] + SINN2[0] * x[7]);
+	float u10=            (-SINN2[3] * x[3] + COSN2[3] * x[4]);
+
+	float u01=            ( COSN2[1] * x[1] + SINN2[1] * x[6]);
+	float u11=           -(-SINN2[2] * x[2] + COSN2[2] * x[5]);
+
+	float u02=            ( COSN2[2] * x[2] + SINN2[2] * x[5]);
+	float u12=            (-SINN2[1] * x[1] + COSN2[1] * x[6]);
+
+	float u03=            ( COSN2[3] * x[3] + SINN2[3] * x[4]);
+	float u13=           -(-SINN2[0] * x[0] + COSN2[0] * x[7]);
+
+//	_dctii_nrecurs4(u00, u01, u02, u03, &v00, &v01, &v02, &v03);
+
+	float ua00= u00 + u03;
+	float ua10= u00 - u03;
+
+	float ua01= u01 + u02;
+	float ua11= u01 - u02;
+
+	float v00= ua00 + ua01;
+	float v02= ua00 - ua01;
+
+	float v01= COSPI_1_8_SQRT2 * ua10 + COSPI_3_8_SQRT2 * ua11;
+	float v03= COSPI_3_8_SQRT2 * ua10 - COSPI_1_8_SQRT2 * ua11;
+
+//	_dctii_nrecurs4(u10, u11, u12, u13, &v10, &v11, &v12, &v13);
+
+	float ub00= u10 + u13;
+	float ub10= u10 - u13;
+
+	float ub01= u11 + u12;
+	float ub11= u11 - u12;
+
+	float vb00= ub00 + ub01;
+	float vb01= ub00 - ub01;
+
+	float vb10= COSPI_1_8_SQRT2*ub10 + COSPI_3_8_SQRT2*ub11;
+	float vb11= COSPI_3_8_SQRT2*ub10 - COSPI_1_8_SQRT2*ub11;
+
+
+	y[0] =  SQRT_2 * v00;    // w0[0];
+	y[1] =  v01 -  vb11;    // w1[0];
+	// j == 1
+	y[2] =  v01 +  vb11;    // w0[1];
+	y[3] =  v02 +  vb01;    // w1[1];
+	// j == 2
+	y[4] =  v02 -  vb01;    // w0[2];
+	y[5] =  v03 -  vb10;    // w1[2]; - same as y[3]
+	// j == 3
+	y[6] =  v03 +  vb10;    // w0[3];
+	y[7] =  SQRT_2 * vb00;    // w1[3];
+}
+
+__device__ void _dttiv(float x0, float x1,float x2, float x3,float x4, float x5,float x6, float x7,
+		float *y0, float *y1, float *y2, float *y3, float *y4, float *y5, float *y6, float *y7, int dst_not_dct)
+{
+	float u00, u01, u02, u03, u10, u11, u12, u13;
+	if (dst_not_dct) { // DSTIV
+		u00=  ( COSN2[0] * x7 + SINN2[0] * x0);
+		u10=  (-SINN2[3] * x4 + COSN2[3] * x3);
+
+		u01=  ( COSN2[1] * x6 + SINN2[1] * x1);
+		u11= -(-SINN2[2] * x5 + COSN2[2] * x2);
+
+		u02=  ( COSN2[2] * x5 + SINN2[2] * x2);
+		u12=  (-SINN2[1] * x6 + COSN2[1] * x1);
+
+		u03=  ( COSN2[3] * x4 + SINN2[3] * x3);
+		u13= -(-SINN2[0] * x7 + COSN2[0] * x0);
+	} else { // DCTIV
+		u00=  ( COSN2[0] * x0 + SINN2[0] * x7);
+		u10=  (-SINN2[3] * x3 + COSN2[3] * x4);
+
+		u01=  ( COSN2[1] * x1 + SINN2[1] * x6);
+		u11= -(-SINN2[2] * x2 + COSN2[2] * x5);
+
+		u02=  ( COSN2[2] * x2 + SINN2[2] * x5);
+		u12=  (-SINN2[1] * x1 + COSN2[1] * x6);
+
+		u03=  ( COSN2[3] * x3 + SINN2[3] * x4);
+		u13= -(-SINN2[0] * x0 + COSN2[0] * x7);
+	}
+
+//	_dctii_nrecurs4(u00, u01, u02, u03, &v00, &v01, &v02, &v03);
+
+	float ua00= u00 + u03;
+	float ua10= u00 - u03;
+
+	float ua01= u01 + u02;
+	float ua11= u01 - u02;
+
+	float v00= ua00 + ua01;
+	float v02= ua00 - ua01;
+
+	float v01= COSPI_1_8_SQRT2 * ua10 + COSPI_3_8_SQRT2 * ua11;
+	float v03= COSPI_3_8_SQRT2 * ua10 - COSPI_1_8_SQRT2 * ua11;
+
+//	_dctii_nrecurs4(u10, u11, u12, u13, &v10, &v11, &v12, &v13);
+
+	float ub00= u10 + u13;
+	float ub10= u10 - u13;
+
+	float ub01= u11 + u12;
+	float ub11= u11 - u12;
+
+	float vb00= ub00 + ub01;
+	float vb01= ub00 - ub01;
+
+	float vb10= COSPI_1_8_SQRT2*ub10 + COSPI_3_8_SQRT2*ub11;
+	float vb11= COSPI_3_8_SQRT2*ub10 - COSPI_1_8_SQRT2*ub11;
+
+	*y0 =  v00 * 0.5f;              // w0[0];
+	// j == 1
+	*y2 =  (v01 +  vb11) * SQRT1_8; // w0[1];
+	// j == 2
+	*y4 =  (v02 -  vb01) * SQRT1_8; // w0[2];
+	// j == 3
+	*y6 =  (v03 +  vb10) * SQRT1_8; // w0[3];
+	if (dst_not_dct) { // DSTIV
+		*y1 =  (vb11 - v01)  * SQRT1_8; // w1[0];
+		*y3 = -(v02 +  vb01) * SQRT1_8; // w1[1];
+		*y5 =  (vb10 - v03)  * SQRT1_8; // w1[2]; - same as y[3]
+		*y7 = -vb00 * 0.5f;             // w1[3];
+	} else {
+		*y1 =  (v01 -  vb11) * SQRT1_8; // w1[0];
+		*y3 =  (v02 +  vb01) * SQRT1_8; // w1[1];
+		*y5 =  (v03 -  vb10) * SQRT1_8; // w1[2]; - same as y[3]
+		*y7 =  vb00 * 0.5f;             // w1[3];
+	}
+}
+
+inline __device__ void dttii_shared_mem(float * x0,  int inc, int dst_not_dct)
+{
+	float *x1 = x0 + inc;
+	float *x2 = x1 + inc;
+	float *x3 = x2 + inc;
+	float *x4 = x3 + inc;
+	float *x5 = x4 + inc;
+	float *x6 = x5 + inc;
+	float *x7 = x6 + inc;
+	float u00, u01, u02, u03, u10, u11, u12, u13;
+	if (dst_not_dct) { // DSTII
+		// invert odd input samples
+		u00= ( (*x0) - (*x7));
+		u10= ( (*x0) + (*x7));
+
+		u01= (-(*x1) + (*x6));
+		u11= (-(*x1) - (*x6));
+
+		u02= ( (*x2) - (*x5));
+		u12= ( (*x2) + (*x5));
+
+		u03= (-(*x3) + (*x4));
+		u13= (-(*x3) - (*x4));
+	} else { // DCTII
+		u00= ( (*x0) + (*x7));
+		u10= ( (*x0) - (*x7));
+
+		u01= ( (*x1) + (*x6));
+		u11= ( (*x1) - (*x6));
+
+		u02= ( (*x2) + (*x5));
+		u12= ( (*x2) - (*x5));
+
+		u03= ( (*x3) + (*x4));
+		u13= ( (*x3) - (*x4));
+	}
+	//	_dctii_nrecurs4(u00,u01, u02, u03, &v00, &v01, &v02, &v03);
+
+		float w00= u00 + u03;
+		float w10= u00 - u03;
+
+		float w01= (u01 + u02);
+		float w11= (u01 - u02);
+
+		float v01= COSPI_1_8_SQRT2 * w10 + COSPI_3_8_SQRT2 * w11;
+		float v03= COSPI_3_8_SQRT2 * w10 - COSPI_1_8_SQRT2 * w11;
+	//	_dctiv_nrecurs4(u10, u11, u12, u13, &v10, &v11, &v12, &v13);
+		float w20=            ( COSN1[0] * u10 + SINN1[0] * u13);
+		float w30=            (-SINN1[1] * u11 + COSN1[1] * u12);
+
+		float w21=            ( COSN1[1] * u11 + SINN1[1] * u12);
+		float w31=           -(-SINN1[0] * u10 + COSN1[0] * u13);
+		float v11 = w20 - w21 - w30 + w31;
+		float v12 = w20 - w21 + w30 - w31;
+
+	if (dst_not_dct) { // DSTII
+		// Invert output sequence
+		*x0 =   (w30 + w31)*  0.5f;    // v13 * SQRT1_8; z10 * 0.5f
+		*x1 =   v03 *         SQRT1_8;
+
+		*x2 =   v12 *         SQRT1_8;
+		*x3 =   (w00 - w01) * SQRT1_8; // v02 * SQRT1_8
+
+		*x4 =   v11 *         SQRT1_8;
+		*x5 =   v01 *         SQRT1_8;
+
+		*x6 =   (w20 + w21) * 0.5f;    // v10 * SQRT1_8; z00 * 0.5f;
+		*x7 =   (w00 + w01) * SQRT1_8; // v00 * SQRT1_8
+	} else {
+		*x0 =   (w00 + w01) * SQRT1_8; // v00 * SQRT1_8
+		*x1 =   (w20 + w21) * 0.5f;    // v10 * SQRT1_8; z00 * 0.5f;
+
+		*x2 =   v01 *         SQRT1_8;
+		*x3 =   v11 *         SQRT1_8;
+
+		*x4 =   (w00 - w01) * SQRT1_8; // v02 * SQRT1_8
+		*x5 =   v12 *         SQRT1_8;
+
+		*x6 =   v03 *         SQRT1_8;
+		*x7 =   (w30 + w31)*  0.5f;    // v13 * SQRT1_8; z10 * 0.5f
+	}
+}
+
+inline __device__ void dttii_shared_mem_nonortho(float * x0,  int inc, int dst_not_dct)
+{
+	float *x1 = x0 + inc;
+	float *x2 = x1 + inc;
+	float *x3 = x2 + inc;
+	float *x4 = x3 + inc;
+	float *x5 = x4 + inc;
+	float *x6 = x5 + inc;
+	float *x7 = x6 + inc;
+	float u00, u01, u02, u03, u10, u11, u12, u13;
+	if (dst_not_dct) { // DSTII
+		// invert odd input samples
+		u00= ( (*x0) - (*x7));
+		u10= ( (*x0) + (*x7));
+
+		u01= (-(*x1) + (*x6));
+		u11= (-(*x1) - (*x6));
+
+		u02= ( (*x2) - (*x5));
+		u12= ( (*x2) + (*x5));
+
+		u03= (-(*x3) + (*x4));
+		u13= (-(*x3) - (*x4));
+	} else { // DCTII
+		u00= ( (*x0) + (*x7));
+		u10= ( (*x0) - (*x7));
+
+		u01= ( (*x1) + (*x6));
+		u11= ( (*x1) - (*x6));
+
+		u02= ( (*x2) + (*x5));
+		u12= ( (*x2) - (*x5));
+
+		u03= ( (*x3) + (*x4));
+		u13= ( (*x3) - (*x4));
+	}
+	//	_dctii_nrecurs4(u00,u01, u02, u03, &v00, &v01, &v02, &v03);
+
+		float w00= u00 + u03;
+		float w10= u00 - u03;
+
+		float w01= (u01 + u02);
+		float w11= (u01 - u02);
+
+		float v01= COSPI_1_8_SQRT2 * w10 + COSPI_3_8_SQRT2 * w11;
+		float v03= COSPI_3_8_SQRT2 * w10 - COSPI_1_8_SQRT2 * w11;
+	//	_dctiv_nrecurs4(u10, u11, u12, u13, &v10, &v11, &v12, &v13);
+		float w20=            ( COSN1[0] * u10 + SINN1[0] * u13);
+		float w30=            (-SINN1[1] * u11 + COSN1[1] * u12);
+
+		float w21=            ( COSN1[1] * u11 + SINN1[1] * u12);
+		float w31=           -(-SINN1[0] * u10 + COSN1[0] * u13);
+		float v11 = w20 - w21 - w30 + w31;
+		float v12 = w20 - w21 + w30 - w31;
+
+	if (dst_not_dct) { // DSTII
+		// Invert output sequence
+		*x0 =   (w30 + w31)*  0.5f;    // v13 * SQRT1_8; z10 * 0.5f
+		*x1 =   v03 *         SQRT1_8;
+
+		*x2 =   v12 *         SQRT1_8;
+		*x3 =   (w00 - w01) * SQRT1_8; // v02 * SQRT1_8
+
+		*x4 =   v11 *         SQRT1_8;
+		*x5 =   v01 *         SQRT1_8;
+
+		*x6 =   (w20 + w21) * 0.5f;    // v10 * SQRT1_8; z00 * 0.5f;
+		*x7 =   (w00 + w01) * 0.5f;    // SQRT1_8; // v00 * SQRT1_8 //*** no 1/sqrt(2)!
+	} else {
+		*x0 =   (w00 + w01) * 0.5f;    // SQRT1_8; // v00 * SQRT1_8 //*** no 1/sqrt(2)!
+		*x1 =   (w20 + w21) * 0.5f;    // v10 * SQRT1_8; z00 * 0.5f;
+
+		*x2 =   v01 *         SQRT1_8;
+		*x3 =   v11 *         SQRT1_8;
+
+		*x4 =   (w00 - w01) * SQRT1_8; // v02 * SQRT1_8
+		*x5 =   v12 *         SQRT1_8;
+
+		*x6 =   v03 *         SQRT1_8;
+		*x7 =   (w30 + w31)*  0.5f;    // v13 * SQRT1_8; z10 * 0.5f
+	}
+}
+
+inline __device__ void dttiv_shared_mem(float * x0,  int inc, int dst_not_dct)
+{
+	float *x1 = x0 + inc;
+	float *x2 = x1 + inc;
+	float *x3 = x2 + inc;
+	float *x4 = x3 + inc;
+	float *x5 = x4 + inc;
+	float *x6 = x5 + inc;
+	float *x7 = x6 + inc;
+	float u00, u01, u02, u03, u10, u11, u12, u13;
+	if (dst_not_dct) { // DSTIV
+		u00=  ( COSN2[0] * (*x7) + SINN2[0] * (*x0));
+		u10=  (-SINN2[3] * (*x4) + COSN2[3] * (*x3));
+
+		u01=  ( COSN2[1] * (*x6) + SINN2[1] * (*x1));
+		u11= -(-SINN2[2] * (*x5) + COSN2[2] * (*x2));
+
+		u02=  ( COSN2[2] * (*x5) + SINN2[2] * (*x2));
+		u12=  (-SINN2[1] * (*x6) + COSN2[1] * (*x1));
+
+		u03=  ( COSN2[3] * (*x4) + SINN2[3] * (*x3));
+		u13= -(-SINN2[0] * (*x7) + COSN2[0] * (*x0));
+	} else { // DCTIV
+		u00=  ( COSN2[0] * (*x0) + SINN2[0] * (*x7));
+		u10=  (-SINN2[3] * (*x3) + COSN2[3] * (*x4));
+
+		u01=  ( COSN2[1] * (*x1) + SINN2[1] * (*x6));
+		u11= -(-SINN2[2] * (*x2) + COSN2[2] * (*x5));
+
+		u02=  ( COSN2[2] * (*x2) + SINN2[2] * (*x5));
+		u12=  (-SINN2[1] * (*x1) + COSN2[1] * (*x6));
+
+		u03=  ( COSN2[3] * (*x3) + SINN2[3] * (*x4));
+		u13= -(-SINN2[0] * (*x0) + COSN2[0] * (*x7));
+	}
+
+//	_dctii_nrecurs4(u00, u01, u02, u03, &v00, &v01, &v02, &v03);
+
+	float ua00= u00 + u03;
+	float ua10= u00 - u03;
+
+	float ua01= u01 + u02;
+	float ua11= u01 - u02;
+
+	float v00= ua00 + ua01;
+	float v02= ua00 - ua01;
+
+	float v01= COSPI_1_8_SQRT2 * ua10 + COSPI_3_8_SQRT2 * ua11;
+	float v03= COSPI_3_8_SQRT2 * ua10 - COSPI_1_8_SQRT2 * ua11;
+
+//	_dctii_nrecurs4(u10, u11, u12, u13, &v10, &v11, &v12, &v13);
+
+	float ub00= u10 + u13;
+	float ub10= u10 - u13;
+
+	float ub01= u11 + u12;
+	float ub11= u11 - u12;
+
+	float vb00= ub00 + ub01;
+	float vb01= ub00 - ub01;
+
+	float vb10= COSPI_1_8_SQRT2*ub10 + COSPI_3_8_SQRT2*ub11;
+	float vb11= COSPI_3_8_SQRT2*ub10 - COSPI_1_8_SQRT2*ub11;
+
+
+	*x0 =  v00 * 0.5f;              // w0[0];
+	*x2 =  (v01 +  vb11) * SQRT1_8; // w0[1];
+	*x4 =  (v02 -  vb01) * SQRT1_8; // w0[2];
+	*x6 =  (v03 +  vb10) * SQRT1_8; // w0[3];
+	if (dst_not_dct) { // DSTIV
+		*x1 =  (vb11 - v01)  * SQRT1_8; // w1[0];
+		*x3 = -(v02 +  vb01) * SQRT1_8; // w1[1];
+		*x5 =  (vb10 - v03)  * SQRT1_8; // w1[2]; - same as y[3]
+		*x7 = -vb00 * 0.5f;             // w1[3];
+	} else {
+		*x1 =  (v01 -  vb11) * SQRT1_8; // w1[0];
+		*x3 =  (v02 +  vb01) * SQRT1_8; // w1[1];
+		*x5 =  (v03 -  vb10) * SQRT1_8; // w1[2]; - same as y[3]
+		*x7 =  vb00 * 0.5f;             // w1[3];
+	}
+}
+
+inline __device__ void dttiv_nodiverg(float * x,  int inc, int dst_not_dct)
+{
+	float sgn = 1 - 2* dst_not_dct;
+	float *y0 = x;
+	float *y1 = y0 + inc;
+	float *y2 = y1 + inc;
+	float *y3 = y2 + inc;
+	float *y4 = y3 + inc;
+	float *y5 = y4 + inc;
+	float *y6 = y5 + inc;
+	float *y7 = y6 + inc;
+
+	float *x0 =  x + dst_not_dct * 7 * inc;
+	// negate inc, replace
+	inc *= sgn;
+	float *x1 = x0 + inc;
+	float *x2 = x1 + inc;
+	float *x3 = x2 + inc;
+	float *x4 = x3 + inc;
+	float *x5 = x4 + inc;
+	float *x6 = x5 + inc;
+	float *x7 = x6 + inc;
+	float u00, u01, u02, u03, u10, u11, u12, u13;
+	u00=  ( COSN2[0] * (*x0) + SINN2[0] * (*x7));
+	u10=  (-SINN2[3] * (*x3) + COSN2[3] * (*x4));
+
+	u01=  ( COSN2[1] * (*x1) + SINN2[1] * (*x6));
+	u11= -(-SINN2[2] * (*x2) + COSN2[2] * (*x5));
+
+	u02=  ( COSN2[2] * (*x2) + SINN2[2] * (*x5));
+	u12=  (-SINN2[1] * (*x1) + COSN2[1] * (*x6));
+
+	u03=  ( COSN2[3] * (*x3) + SINN2[3] * (*x4));
+	u13= -(-SINN2[0] * (*x0) + COSN2[0] * (*x7));
+
+//	_dctii_nrecurs4(u00, u01, u02, u03, &v00, &v01, &v02, &v03);
+
+	float ua00= u00 + u03;
+	float ua10= u00 - u03;
+
+	float ua01= u01 + u02;
+	float ua11= u01 - u02;
+
+	float v00= ua00 + ua01;
+	float v02= ua00 - ua01;
+
+	float v01= COSPI_1_8_SQRT2 * ua10 + COSPI_3_8_SQRT2 * ua11;
+	float v03= COSPI_3_8_SQRT2 * ua10 - COSPI_1_8_SQRT2 * ua11;
+
+//	_dctii_nrecurs4(u10, u11, u12, u13, &v10, &v11, &v12, &v13);
+
+	float ub00= u10 + u13;
+	float ub10= u10 - u13;
+
+	float ub01= u11 + u12;
+	float ub11= u11 - u12;
+
+	float vb00= ub00 + ub01;
+	float vb01= ub00 - ub01;
+
+	float vb10= COSPI_1_8_SQRT2*ub10 + COSPI_3_8_SQRT2*ub11;
+	float vb11= COSPI_3_8_SQRT2*ub10 - COSPI_1_8_SQRT2*ub11;
+
+
+	*y0 =  v00 * 0.5f;              // w0[0];
+	*y2 =  (v01 +  vb11) * SQRT1_8; // w0[1];
+	*y4 =  (v02 -  vb01) * SQRT1_8; // w0[2];
+	*y6 =  (v03 +  vb10) * SQRT1_8; // w0[3];
+	*y1 =  sgn * (v01 -  vb11) * SQRT1_8; // w1[0];
+	*y3 =  sgn * (v02 +  vb01) * SQRT1_8; // w1[1];
+	*y5 =  sgn * (v03 -  vb10) * SQRT1_8; // w1[2]; - same as y[3]
+	*y7 =  sgn * vb00 * 0.5f;             // w1[3];
+}
+
+inline __device__ void dctiv_nodiverg(float * x0,  int inc)
+{
+	float *x1 = x0 + inc;
+	float *x2 = x1 + inc;
+	float *x3 = x2 + inc;
+	float *x4 = x3 + inc;
+	float *x5 = x4 + inc;
+	float *x6 = x5 + inc;
+	float *x7 = x6 + inc;
+	float u00, u01, u02, u03, u10, u11, u12, u13;
+	u00=  ( COSN2[0] * (*x0) + SINN2[0] * (*x7));
+	u10=  (-SINN2[3] * (*x3) + COSN2[3] * (*x4));
+
+	u01=  ( COSN2[1] * (*x1) + SINN2[1] * (*x6));
+	u11= -(-SINN2[2] * (*x2) + COSN2[2] * (*x5));
+
+	u02=  ( COSN2[2] * (*x2) + SINN2[2] * (*x5));
+	u12=  (-SINN2[1] * (*x1) + COSN2[1] * (*x6));
+
+	u03=  ( COSN2[3] * (*x3) + SINN2[3] * (*x4));
+	u13= -(-SINN2[0] * (*x0) + COSN2[0] * (*x7));
+
+//	_dctii_nrecurs4(u00, u01, u02, u03, &v00, &v01, &v02, &v03);
+
+	float ua00= u00 + u03;
+	float ua10= u00 - u03;
+
+	float ua01= u01 + u02;
+	float ua11= u01 - u02;
+
+	float v00= ua00 + ua01;
+	float v02= ua00 - ua01;
+
+	float v01= COSPI_1_8_SQRT2 * ua10 + COSPI_3_8_SQRT2 * ua11;
+	float v03= COSPI_3_8_SQRT2 * ua10 - COSPI_1_8_SQRT2 * ua11;
+
+//	_dctii_nrecurs4(u10, u11, u12, u13, &v10, &v11, &v12, &v13);
+
+	float ub00= u10 + u13;
+	float ub10= u10 - u13;
+
+	float ub01= u11 + u12;
+	float ub11= u11 - u12;
+
+	float vb00= ub00 + ub01;
+	float vb01= ub00 - ub01;
+
+	float vb10= COSPI_1_8_SQRT2*ub10 + COSPI_3_8_SQRT2*ub11;
+	float vb11= COSPI_3_8_SQRT2*ub10 - COSPI_1_8_SQRT2*ub11;
+
+
+	*x0 =  v00 * 0.5f;              // w0[0];
+	*x2 =  (v01 +  vb11) * SQRT1_8; // w0[1];
+	*x4 =  (v02 -  vb01) * SQRT1_8; // w0[2];
+	*x6 =  (v03 +  vb10) * SQRT1_8; // w0[3];
+	*x1 =  (v01 -  vb11) * SQRT1_8; // w1[0];
+	*x3 =  (v02 +  vb01) * SQRT1_8; // w1[1];
+	*x5 =  (v03 -  vb10) * SQRT1_8; // w1[2]; - same as y[3]
+	*x7 =   vb00 * 0.5f;             // w1[3];
+}
+
+inline __device__ void dstiv_nodiverg(float * x,  int inc)
+{
+	float *x0 =  x +  7 * inc;
+	// negate inc, replace
+	inc = -inc;
+	float *x1 = x0 + inc;
+	float *x2 = x1 + inc;
+	float *x3 = x2 + inc;
+	float *x4 = x3 + inc;
+	float *x5 = x4 + inc;
+	float *x6 = x5 + inc;
+	float *x7 = x6 + inc;
+	float u00, u01, u02, u03, u10, u11, u12, u13;
+	u00=  ( COSN2[0] * (*x0) + SINN2[0] * (*x7));
+	u10=  (-SINN2[3] * (*x3) + COSN2[3] * (*x4));
+
+	u01=  ( COSN2[1] * (*x1) + SINN2[1] * (*x6));
+	u11= -(-SINN2[2] * (*x2) + COSN2[2] * (*x5));
+
+	u02=  ( COSN2[2] * (*x2) + SINN2[2] * (*x5));
+	u12=  (-SINN2[1] * (*x1) + COSN2[1] * (*x6));
+
+	u03=  ( COSN2[3] * (*x3) + SINN2[3] * (*x4));
+	u13= -(-SINN2[0] * (*x0) + COSN2[0] * (*x7));
+
+//	_dctii_nrecurs4(u00, u01, u02, u03, &v00, &v01, &v02, &v03);
+
+	float ua00= u00 + u03;
+	float ua10= u00 - u03;
+
+	float ua01= u01 + u02;
+	float ua11= u01 - u02;
+
+	float v00= ua00 + ua01;
+	float v02= ua00 - ua01;
+
+	float v01= COSPI_1_8_SQRT2 * ua10 + COSPI_3_8_SQRT2 * ua11;
+	float v03= COSPI_3_8_SQRT2 * ua10 - COSPI_1_8_SQRT2 * ua11;
+
+//	_dctii_nrecurs4(u10, u11, u12, u13, &v10, &v11, &v12, &v13);
+
+	float ub00= u10 + u13;
+	float ub10= u10 - u13;
+
+	float ub01= u11 + u12;
+	float ub11= u11 - u12;
+
+	float vb00= ub00 + ub01;
+	float vb01= ub00 - ub01;
+
+	float vb10= COSPI_1_8_SQRT2*ub10 + COSPI_3_8_SQRT2*ub11;
+	float vb11= COSPI_3_8_SQRT2*ub10 - COSPI_1_8_SQRT2*ub11;
+
+
+	*x7 =  v00 * 0.5f;              // w0[0];
+	*x5 =  (v01 +  vb11) * SQRT1_8; // w0[1];
+	*x3 =  (v02 -  vb01) * SQRT1_8; // w0[2];
+	*x1 =  (v03 +  vb10) * SQRT1_8; // w0[3];
+
+	*x6 =  (vb11 - v01)  * SQRT1_8; // w1[0];
+	*x4 = -(v02 +  vb01) * SQRT1_8; // w1[1];
+	*x2 =  (vb10 - v03)  * SQRT1_8; // w1[2]; - same as y[3]
+	*x0 = -vb00 * 0.5f;             // w1[3];
+}
+
+
+
+inline  __device__ void _dctii_nrecurs8( float x[8], float y[8]) // x,y point to 8-element arrays each
+{
+	float u00= (x[0] + x[7]);
+	float u10= (x[0] - x[7]);
+
+	float u01= (x[1] + x[6]);
+	float u11= (x[1] - x[6]);
+
+	float u02= (x[2] + x[5]);
+	float u12= (x[2] - x[5]);
+
+	float u03= (x[3] + x[4]);
+	float u13= (x[3] - x[4]);
+
+//	_dctii_nrecurs4(u00, u01, u02, u03, &v00, &v01, &v02, &v03);
+
+	float w00= u00 + u03;
+	float w10= u00 - u03;
+
+	float w01= (u01 + u02);
+	float w11= (u01 - u02);
+
+	float v00= w00 + w01;
+	float v02= w00 - w01;
+	float v01= COSPI_1_8_SQRT2 * w10 + COSPI_3_8_SQRT2 * w11;
+	float v03= COSPI_3_8_SQRT2 * w10 - COSPI_1_8_SQRT2 * w11;
+
+//	_dctiv_nrecurs4(u10, u11, u12, u13, &v10, &v11, &v12, &v13);
+	float w20=            ( COSN1[0] * u10 + SINN1[0] * u13);
+	float w30=            (-SINN1[1] * u11 + COSN1[1] * u12);
+
+	float w21=            ( COSN1[1] * u11 + SINN1[1] * u12);
+	float w31=           -(-SINN1[0] * u10 + COSN1[0] * u13);
+
+//	_dctii_nrecurs2(u00, u01, &v00, &v01);
+	float z00= w20 + w21;
+	float z01= w20 - w21;
+
+//	_dctii_nrecurs2(u10, u11, &v10, &v11);
+	float z10= w30 + w31;
+	float z11= w30 - w31;
+
+	float v10 = SQRT_2 * z00;
+	float v11 = z01 - z11;
+
+	float v12 = z01 + z11;
+	float v13 = SQRT_2 * z10;
+
+	y[0] =   v00;
+	y[1] =   v10;
+
+	y[2] =   v01;
+	y[3] =   v11;
+
+	y[4] =   v02;
+	y[5] =   v12;
+
+	y[6] =   v03;
+	y[7] =   v13;
+}
+
+inline  __device__ void dct_ii8( float x[8], float y[8]) // x,y point to 8-element arrays each
+{
+	_dctii_nrecurs8(x, y);
+#pragma unroll
+	for (int i = 0; i < 8 ; i++) {
+		y[i] *= SQRT1_8;
+	}
+}
+
+
+__device__ void dct_iv8( float x[8], float y[8]) // x,y point to 8-element arrays each
+{
+	_dctiv_nrecurs8(x, y);
+#pragma unroll
+	for (int i = 0; i < 8 ; i++) {
+		y[i] *= SQRT1_8;
+	}
+
+}
+
+inline __device__ void dst_iv8( float x[8], float y[8]) // x,y point to 8-element arrays each
+{
+	float xr[8];
+#pragma unroll
+	for (int i=0; i < 8;i++){
+		xr[i] = x[7 - i];
+	}
+	_dctiv_nrecurs8(xr, y);
+#pragma unroll
+	for (int i=0; i < 8;i+=2){
+		y[i]   *=  SQRT1_8;
+		y[i+1] *= -SQRT1_8;
+	}
+}
+
+
+//=========================== 2D functions ===============
+__device__ void corrUnfoldTile(
+		int corr_radius,
+		float* qdata0, //    [4][DTT_SIZE][DTT_SIZE1], // 4 quadrants of the clt data, rows extended to optimize shared ports
+		float* rslt)  //   [DTT_SIZE2M1][DTT_SIZE2M1]) // 15x15
+{
+	int size2r1 = 2 * corr_radius + 1; // 15
+	int crp1 = corr_radius + 1;        //8
+///	const int rslt_base_index = DTT_SIZE2M1 * (DTT_SIZE) - DTT_SIZE; // offset of the center
+	int rslt_base_index = size2r1 * crp1 - crp1; // offset of the center
+
+	float * qdata1 = qdata0 + (DTT_SIZE * DTT_SIZE1);
+	float * qdata2 = qdata1 + (DTT_SIZE * DTT_SIZE1);
+	float * qdata3 = qdata2 + (DTT_SIZE * DTT_SIZE1);
+	int i = threadIdx.x;
+	if (i > corr_radius) {
+		return; // not needed, only use inner
+	}
+//	printf("\corrUnfoldTile() corr_radius=%d, i=%d\n",corr_radius,i);
+	float corr_pixscale = 0.25f;
+	int i_transform_size = i * DTT_SIZE1; // used to address source rows which are 9 long
+	int im1_transform_size = i_transform_size - DTT_SIZE1; // negative for i = 0, use only after divergence
+///	int rslt_row_offs = i * DTT_SIZE2M1;
+	int rslt_row_offs = i * size2r1;
+	int rslt_base_index_p = rslt_base_index + rslt_row_offs; // i * DTT_SIZE2M1;
+	int rslt_base_index_m = rslt_base_index - rslt_row_offs; // i * DTT_SIZE2M1;
+	rslt[rslt_base_index_p] = corr_pixscale * qdata0[i_transform_size]; // incomplete, will only be used for thread i=0
+	rslt[rslt_base_index_m] = rslt[rslt_base_index_p];                  // nop for i=0 incomplete, will only be used for thread i=0
+///	for (int j = 1; j < DTT_SIZE; j++) {
+	for (int j = 1; j <= corr_radius; j++) {
+		int rslt_base_index_pp = rslt_base_index_p + j;
+		int rslt_base_index_pm = rslt_base_index_p - j;
+		rslt[rslt_base_index_pp] = corr_pixscale * (
+				 qdata0[i_transform_size + j] +
+				 qdata1[i_transform_size + j -1]); // incomplete, will only be used for thread i=0
+		rslt[rslt_base_index_pm] = corr_pixscale * (
+				 qdata0[i_transform_size + j] +
+				-qdata1[i_transform_size + j -1]); // incomplete, will only be used for thread i=0
+	}
+	if (i == 0) {
+		return;
+	}
+///	im1_transform_size = i_transform_size - DTT_SIZE1; // already is calculated
+	float d = corr_pixscale * qdata2[im1_transform_size];
+	rslt[rslt_base_index_p] += d;
+	rslt[rslt_base_index_m] -= d;
+	for (int j = 1; j <= corr_radius; j++) {
+		int rslt_base_index_pp = rslt_base_index_p + j;
+		int rslt_base_index_pm = rslt_base_index_p - j;
+		int rslt_base_index_mp = rslt_base_index_m + j;
+		int rslt_base_index_mm = rslt_base_index_m - j;
+		float d2 = corr_pixscale * qdata2[im1_transform_size + j];
+		float d3 = corr_pixscale * qdata3[im1_transform_size + j -1];
+		//rslt[rslt_base_index_mp], rslt[rslt_base_index_mp] are partially calculated in the cycle common with i=0
+		rslt[rslt_base_index_mp] = rslt[rslt_base_index_pp] - d2 - d3;
+		rslt[rslt_base_index_mm] = rslt[rslt_base_index_pm] - d2 + d3;
+		rslt[rslt_base_index_pp] += d2 + d3;
+		rslt[rslt_base_index_pm] += d2 - d3;
+	}
+}
+
+__device__ void dttii_2d(
+		float * clt_corr) // shared memory, [4][DTT_SIZE1][DTT_SIZE]
+{
+    // change to 16-32 threads?? in next iteration
+    // vert pass (hor pass in Java, before transpose. Here transposed, no transform needed)
+    for (int q = 0; q < 4; q++){
+    	int is_sin = (q >> 1) & 1;
+    	dttii_shared_mem_nonortho(clt_corr + q * (DTT_SIZE1 * DTT_SIZE) + threadIdx.x , DTT_SIZE1, is_sin); // vertical pass, thread is column
+    }
+    __syncthreads();
+
+    // hor pass, corresponding to vert pass in Java
+    for (int q = 0; q < 4; q++){
+    	int is_sin = q & 1;
+    	dttii_shared_mem_nonortho(clt_corr + (q * DTT_SIZE + threadIdx.x) * DTT_SIZE1 ,  1, is_sin); // horizontal pass, tread is row
+    }
+    __syncthreads();
+
+}
+
+__device__ void dttiv_color_2d(
+		float * clt_tile,
+		int color)
+{
+    dctiv_nodiverg( // all colors
+			clt_tile + (DTT_SIZE1 * threadIdx.x), // [0][threadIdx.x], // pointer to start of row
+			1); //int inc);
+    if (color == BAYER_GREEN){
+        dstiv_nodiverg( // all colors
+				clt_tile + DTT_SIZE1 * threadIdx.x + DTT_SIZE1 * DTT_SIZE, // clt_tile[1][threadIdx.x], // pointer to start of row
+    			1); //int inc);
+
+    }
+  	 __syncthreads();// __syncwarp();
+
+#ifdef DEBUG222
+    if ((threadIdx.x) == 0){
+        printf("\nDTT Tiles after horizontal pass, color=%d\n",color);
+    	debug_print_clt1(clt_tile, color, (color== BAYER_GREEN)?3:1); // only 1 quadrant for R,B and 2 - for G
+    }
+     __syncthreads();// __syncwarp();
+#endif
+    dctiv_nodiverg( // all colors
+    		clt_tile + threadIdx.x, //  &clt_tile[0][0][threadIdx.x], // pointer to start of column
+			DTT_SIZE1); // int inc,
+    if (color == BAYER_GREEN){
+          dctiv_nodiverg( // all colors
+        		clt_tile + threadIdx.x + (DTT_SIZE1 * DTT_SIZE), // &clt_tile[1][0][threadIdx.x], // pointer to start of column
+    			DTT_SIZE1); // int inc,
+    }
+  	 __syncthreads();// __syncwarp();
+}
+
+//
+// Uses 16 threads, gets 4*8*8 clt tiles, performs idtt-iv (swapping 1 and 2 quadrants) and then unfolds with window,
+// adding to the output 16x16 tile (to use Read-modify-write with 4 passes over the frame. Should be zeroed before the
+// first pass
+//__constant__ int imclt_indx9[16] = {0x28,0x31,0x3a,0x43,0x43,0x3a,0x31,0x28,0x1f,0x16,0x0d,0x04,0x04,0x0d,0x16,0x1f};
+__device__ void imclt(
+		float * clt_tile,   //        [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports [4][8][9]
+		float * mclt_tile ) //           [2* DTT_SIZE][DTT_SIZE1+ DTT_SIZE], // +1 to alternate column ports[16][17]
+{
+	int thr3 =    threadIdx.x >> 3;
+	int column =  threadIdx.x; // modify to use 2*8 threads, if needed.
+	int thr012 =  threadIdx.x & 7;
+	int column4 = threadIdx.x >> 2;
+//	int wcolumn =column ^ (7 * thr3); //0..7,7,..0
+//	int wcolumn = ((thr3 << 3) -1) ^ thr3; //0..7,7,..0
+	int wcolumn = ((thr3 << 3) - thr3) ^ thr012; //0..7,7,..0
+	float * clt_tile1 = clt_tile +  (DTT_SIZE1 * DTT_SIZE);
+	float * clt_tile2 = clt_tile1 + (DTT_SIZE1 * DTT_SIZE);
+	float * clt_tile3 = clt_tile2 + (DTT_SIZE1 * DTT_SIZE);
+#ifdef DEBUG3
+    if ((threadIdx.x) == 0){
+        printf("\nDTT Tiles before IDTT\n");
+    	debug_print_clt1(clt_tile, -1,  0xf); // only 1 quadrant for R,B and 2 - for G
+    }
+     __syncthreads();// __syncwarp();
+#endif
+
+	// perform horizontal dct-iv on quadrants 0 and 1
+    dctiv_nodiverg(
+    		clt_tile +  DTT_SIZE1 * (thr012 + 2*DTT_SIZE * thr3), // pointer to start of row for quadrants 0 and 2
+			1);
+	// perform horizontal dst-iv on quadrants 2 and 3
+    dstiv_nodiverg( // all colors
+    		clt_tile1 + DTT_SIZE1 * (thr012 + 2*DTT_SIZE * thr3), // pointer to start of row for quadrants 1 and 3
+			1);
+    __syncthreads();// __syncwarp();
+	// perform vertical   dct-iv on quadrants 0 and 2
+    dctiv_nodiverg(
+    		clt_tile +  thr012 + (DTT_SIZE1 *   DTT_SIZE) * thr3, // pointer to start of row for quadrants 0 and 1
+			DTT_SIZE1);
+	// perform vertical   dst-iv on quadrants 1 and 3
+    dstiv_nodiverg(
+    		clt_tile2 + thr012 + (DTT_SIZE1 *   DTT_SIZE) * thr3, // pointer to start of row for quadrants 2 and 3
+			DTT_SIZE1);
+    __syncthreads();// __syncwarp();
+
+#ifdef DEBUG3
+    if ((threadIdx.x) == 0){
+        printf("\nDTT Tiles after IDTT\n");
+    	debug_print_clt1(clt_tile, -1,  0xf); // only 1 quadrant for R,B and 2 - for G
+    }
+     __syncthreads();// __syncwarp();
+#endif
+
+
+    float hw = HWINDOW2[wcolumn];
+    int clt_offset = imclt_indx9[column]; // index in each of the 4 iclt quadrants, accounting for stride=9
+    float * rslt = mclt_tile + column;
+#pragma unroll
+    for (int i = 0; i < 4; i++){
+    	float val = *rslt;
+    	float w = HWINDOW2[i] * hw;
+    	float d0 = idct_signs[0][0][column4] * (*(clt_tile +  clt_offset));
+    	float d1 = idct_signs[1][0][column4] * (*(clt_tile1 + clt_offset));
+    	float d2 = idct_signs[2][0][column4] * (*(clt_tile2 + clt_offset));
+    	float d3 = idct_signs[3][0][column4] * (*(clt_tile3 + clt_offset));
+    	d0+=d1;
+    	d2+=d3;
+    	d0+= d2;
+    	if (i < 3){
+    		clt_offset +=  DTT_SIZE1;
+    	}
+//    	*rslt = __fmaf_rd(w,d0,val); // w*d0 + val
+    	val = __fmaf_rd(w,d0,val); // w*d0 + val
+    	*rslt = val;
+    	rslt += DTT_SIZE21;
+    }
+#pragma unroll
+    for (int i = 4; i < 8; i++){
+    	float val = *rslt;
+    	float w = HWINDOW2[i] * hw;
+    	float d0 = idct_signs[0][1][column4] * (*(clt_tile +  clt_offset));
+    	float d1 = idct_signs[1][1][column4] * (*(clt_tile1 + clt_offset));
+    	float d2 = idct_signs[2][1][column4] * (*(clt_tile2 + clt_offset));
+    	float d3 = idct_signs[3][1][column4] * (*(clt_tile3 + clt_offset));
+    	d0+=d1;
+    	d2+=d3;
+    	d0+= d2;
+//    	if (i < 7){
+   		clt_offset -=  DTT_SIZE1;
+//    	}
+    	*rslt = __fmaf_rd(w,d0,val); // w*d0 + val
+    	rslt += DTT_SIZE21;
+    }
+#pragma unroll
+    for (int i = 7; i >= 4; i--){
+    	float val = *rslt;
+    	float w = HWINDOW2[i] * hw;
+    	float d0 = idct_signs[0][2][column4] * (*(clt_tile +  clt_offset));
+    	float d1 = idct_signs[1][2][column4] * (*(clt_tile1 + clt_offset));
+    	float d2 = idct_signs[2][2][column4] * (*(clt_tile2 + clt_offset));
+    	float d3 = idct_signs[3][2][column4] * (*(clt_tile3 + clt_offset));
+    	d0+=d1;
+    	d2+=d3;
+    	d0+= d2;
+    	if (i > 4){
+    		clt_offset -=  DTT_SIZE1;
+    	}
+    	*rslt = __fmaf_rd(w,d0,val); // w*d0 + val
+    	rslt += DTT_SIZE21;
+    }
+#pragma unroll
+    for (int i = 3; i >= 0; i--){
+    	float val = *rslt;
+    	float w = HWINDOW2[i] * hw;
+    	float d0 = idct_signs[0][3][column4] * (*(clt_tile +  clt_offset));
+    	float d1 = idct_signs[1][3][column4] * (*(clt_tile1 + clt_offset));
+    	float d2 = idct_signs[2][3][column4] * (*(clt_tile2 + clt_offset));
+    	float d3 = idct_signs[3][3][column4] * (*(clt_tile3 + clt_offset));
+    	d0+=d1;
+    	d2+=d3;
+    	d0+= d2;
+    	if (i > 0){
+    		clt_offset +=  DTT_SIZE1;
+    	}
+    	*rslt = __fmaf_rd(w,d0,val); // w*d0 + val
+    	rslt += DTT_SIZE21;
+    }
+#ifdef DEBUG3
+    __syncthreads();// __syncwarp();
+    if ((threadIdx.x) == 0){
+        printf("\nMCLT Tiles after IMCLT\n");
+    	debug_print_mclt(mclt_tile, -1); // only 1 quadrant for R,B and 2 - for G
+    }
+    __syncthreads();// __syncwarp();
+#endif
+}
+
+
+// Uses 8 threads, gets 4*8*8 clt tiles, performs idtt-iv (swapping 1 and 2 quadrants) and then unfolds to the 16x16
+// adding to the output 16x16 tile (to use Read-modify-write with 4 passes over the frame. Should be zeroed before the
+// first pass
+//__constant__ int imclt_indx9[16] = {0x28,0x31,0x3a,0x43,0x43,0x3a,0x31,0x28,0x1f,0x16,0x0d,0x04,0x04,0x0d,0x16,0x1f};
+
+__device__ void imclt8threads(
+		int     do_acc,     // 1 - add to previous value, 0 - overwrite
+		float * clt_tile,   //        [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports [4][8][9]
+		float * mclt_tile,  //           [2* DTT_SIZE][DTT_SIZE1+ DTT_SIZE], // +1 to alternate column ports[16][17]
+		int debug)
+{
+//	int thr3 =    threadIdx.x >> 3;
+//	int column =  threadIdx.x; // modify to use 2*8 threads, if needed.
+//	int thr012 =  threadIdx.x & 7;
+//	int column4 = threadIdx.x >> 2;
+//	int wcolumn = ((thr3 << 3) - thr3) ^ thr012; //0..7,7,..0
+	float * clt_tile1 = clt_tile +  (DTT_SIZE1 * DTT_SIZE);
+	float * clt_tile2 = clt_tile1 + (DTT_SIZE1 * DTT_SIZE);
+	float * clt_tile3 = clt_tile2 + (DTT_SIZE1 * DTT_SIZE);
+#ifdef DEBUG7
+    if (debug && (threadIdx.x == 0) && (threadIdx.y == 0)){
+        printf("\nDTT Tiles before IDTT\n");
+        debug_print_clt_scaled(clt_tile, -1,  0xf, 0.25); // only 1 quadrant for R,B and 2 - for G
+    }
+     __syncthreads();// __syncwarp();
+#endif
+
+	// perform horizontal dct-iv on quadrants 0 and 1
+    dctiv_nodiverg( // quadrant 0
+    		clt_tile +  threadIdx.x,                              // pointer to start of row for quadrant 0
+			DTT_SIZE1);
+    dctiv_nodiverg( // quadrant 1
+    		clt_tile +  threadIdx.x + (1 * DTT_SIZE * DTT_SIZE1), // pointer to start of row for quadrant 1
+			DTT_SIZE1);
+	// perform horizontal dst-iv on quadrants 2 and 3
+    dstiv_nodiverg( // quadrant 2
+    		clt_tile +  threadIdx.x + (2 * DTT_SIZE * DTT_SIZE1), // pointer to start of row for quadrant 2
+			DTT_SIZE1);
+    dstiv_nodiverg( // quadrant 3
+    		clt_tile +  threadIdx.x + (3 * DTT_SIZE * DTT_SIZE1), // pointer to start of row for quadrant 3
+			DTT_SIZE1);
+    __syncthreads();// __syncwarp();
+	// perform vertical   dct-iv on quadrants 0 and 2
+    dctiv_nodiverg( // quadrant 0
+    		clt_tile +  DTT_SIZE1 * threadIdx.x,                              // pointer to start of row for quadrant 0
+			1);
+    dctiv_nodiverg( // quadrant 2
+    		clt_tile +  DTT_SIZE1 * threadIdx.x + (2 * DTT_SIZE * DTT_SIZE1), // pointer to start of row for quadrant 2
+			1);
+    // perform vertical   dst-iv on quadrants 1 and 3
+    dstiv_nodiverg( // quadrant 1
+    		clt_tile +  DTT_SIZE1 * threadIdx.x + (1 * DTT_SIZE * DTT_SIZE1), // pointer to start of row for quadrant 1
+			1);
+    dstiv_nodiverg( // quadrant 3
+    		clt_tile +  DTT_SIZE1 * threadIdx.x + (3 * DTT_SIZE * DTT_SIZE1), // pointer to start of row for quadrant 3
+			1);
+    __syncthreads();// __syncwarp();
+
+#ifdef DEBUG7
+    if (debug && (threadIdx.x == 0) && (threadIdx.y == 0)){
+    	printf("\nDTT Tiles after IDTT\n");
+    	debug_print_clt_scaled(clt_tile, -1,  0xf, 0.25); // only 1 quadrant for R,B and 2 - for G
+    }
+    __syncthreads();// __syncwarp();
+#endif
+    // re-using 16-thread code (thr3 was bit 3 of threadIdx.x).
+    for (int thr3 = 0; thr3 < 2; thr3++){
+    	int thr3m = (thr3 << 3);
+    	int column =  threadIdx.x + thr3m; // modify to use 2*8 threads, if needed.
+    	int thr012 =  threadIdx.x & 7; // == threadIdx.x
+    	int column4 = column >> 2; // (threadIdx.x >> 2) | (thr3 << 1) ; // different !
+    	int wcolumn = (thr3m - thr3) ^ thr012; //0..7,7,..0
+
+    	float hw = HWINDOW2[wcolumn];
+    	int clt_offset = imclt_indx9[column]; // index in each of the 4 iclt quadrants, accounting for stride=9
+    	float * rslt = mclt_tile + column;
+#ifdef DEBUG7
+        if (debug && (threadIdx.x == 0) && (threadIdx.y == 0)){
+    	printf("\nUnrolling: thr3=%d, thr3m=%d, column=%d, thr012=%d, column4=%d, wcolumn=%d, hw=%f, clt_offset=%d\n",
+    			thr3, thr3m, column, thr012, column4, wcolumn, hw, clt_offset);
+    	debug_print_clt1(clt_tile, -1,  0xf); // only 1 quadrant for R,B and 2 - for G
+    }
+    __syncthreads();// __syncwarp();
+#endif
+
+#pragma unroll
+    	for (int i = 0; i < 4; i++){
+    		float val = *rslt;
+    		// facc
+    		float w = HWINDOW2[i] * hw;
+    		float d0 = idct_signs[0][0][column4] * (*(clt_tile +  clt_offset));
+    		float d1 = idct_signs[1][0][column4] * (*(clt_tile1 + clt_offset));
+    		float d2 = idct_signs[2][0][column4] * (*(clt_tile2 + clt_offset));
+    		float d3 = idct_signs[3][0][column4] * (*(clt_tile3 + clt_offset));
+    		d0+=d1;
+    		d2+=d3;
+    		d0+= d2;
+    		if (i < 3){
+    			clt_offset +=  DTT_SIZE1;
+    		}
+    		//    	*rslt = __fmaf_rd(w,d0,val); // w*d0 + val
+    		// val =__fmaf_rd(w,d0,val); // w*d0 + val
+    		// *rslt = val;
+    		*rslt = do_acc? __fmaf_rd(w,d0,val) : w * d0; // w*d0 + val do_acc - common for all thereads
+    		rslt += DTT_SIZE21;
+    	}
+#pragma unroll
+    	for (int i = 4; i < 8; i++){
+    		float val = *rslt;
+    		float w = HWINDOW2[i] * hw;
+    		float d0 = idct_signs[0][1][column4] * (*(clt_tile +  clt_offset));
+    		float d1 = idct_signs[1][1][column4] * (*(clt_tile1 + clt_offset));
+    		float d2 = idct_signs[2][1][column4] * (*(clt_tile2 + clt_offset));
+    		float d3 = idct_signs[3][1][column4] * (*(clt_tile3 + clt_offset));
+    		d0+=d1;
+    		d2+=d3;
+    		d0+= d2;
+    		//    	if (i < 7){
+    		clt_offset -=  DTT_SIZE1;
+    		//    	}
+//    		*rslt = __fmaf_rd(w,d0,val); // w*d0 + val
+    		*rslt = do_acc? __fmaf_rd(w,d0,val) : w * d0; // w*d0 + val do_acc - common for all thereads
+
+    		rslt += DTT_SIZE21;
+    	}
+#pragma unroll
+    	for (int i = 7; i >= 4; i--){
+    		float val = *rslt;
+    		float w = HWINDOW2[i] * hw;
+    		float d0 = idct_signs[0][2][column4] * (*(clt_tile +  clt_offset));
+    		float d1 = idct_signs[1][2][column4] * (*(clt_tile1 + clt_offset));
+    		float d2 = idct_signs[2][2][column4] * (*(clt_tile2 + clt_offset));
+    		float d3 = idct_signs[3][2][column4] * (*(clt_tile3 + clt_offset));
+    		d0+=d1;
+    		d2+=d3;
+    		d0+= d2;
+    		if (i > 4){
+    			clt_offset -=  DTT_SIZE1;
+    		}
+    		//*rslt = __fmaf_rd(w,d0,val); // w*d0 + val
+    		*rslt = do_acc? __fmaf_rd(w,d0,val) : w * d0; // w*d0 + val do_acc - common for all thereads
+    		rslt += DTT_SIZE21;
+    	}
+#pragma unroll
+    	for (int i = 3; i >= 0; i--){
+    		float val = *rslt;
+    		float w = HWINDOW2[i] * hw;
+    		float d0 = idct_signs[0][3][column4] * (*(clt_tile +  clt_offset));
+    		float d1 = idct_signs[1][3][column4] * (*(clt_tile1 + clt_offset));
+    		float d2 = idct_signs[2][3][column4] * (*(clt_tile2 + clt_offset));
+    		float d3 = idct_signs[3][3][column4] * (*(clt_tile3 + clt_offset));
+    		d0+=d1;
+    		d2+=d3;
+    		d0+= d2;
+    		if (i > 0){
+    			clt_offset +=  DTT_SIZE1;
+    		}
+    		//*rslt = __fmaf_rd(w,d0,val); // w*d0 + val
+    		*rslt = do_acc? __fmaf_rd(w,d0,val) : w * d0; // w*d0 + val do_acc - common for all thereads
+    		rslt += DTT_SIZE21;
+    	}
+    }
+#ifdef DEBUG7
+    __syncthreads();// __syncwarp();
+	for (int ccam = 0; ccam < NUM_CAMS; ccam++) {
+		if (debug  && (threadIdx.x == 0) && (threadIdx.y == ccam)){
+			printf("\nMCLT Tiles after IMCLT, cam=%d\n", threadIdx.y);
+			debug_print_mclt(
+					mclt_tile, //         [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports)
+					-1);
+		}
+		__syncthreads();// __syncwarp();
+	}
+    __syncthreads();// __syncwarp();
+#endif
+}
+
+
+
+
+//#endif
+
