@@ -649,11 +649,13 @@ int main(int argc, char **argv)
     					dim3 grid_imclt((tiles_in_pass + IMCLT_TILES_PER_BLOCK-1) / IMCLT_TILES_PER_BLOCK,1,1);
     					//    				printf("grid_imclt=   (%d, %d, %d)\n",grid_imclt.x,   grid_imclt.y,   grid_imclt.z);
     					imclt_rbg<<<grid_imclt,threads_imclt>>>(
-    							gpu_clt_h[ncam], // float           * gpu_clt,            // [TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
+    							gpu_clt_h[ncam],         // float           * gpu_clt,            // [TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 								gpu_corr_images_h[ncam], // float           * gpu_rbg,            // WIDTH, 3 * HEIGHT
-								color, // int               color,
-								v_offs, // int               v_offset,
-								h_offs, // int               h_offset,
+								1,                       // int               apply_lpf,
+								0,                       // int               mono,               // defines lpf filter
+								color,                   // int               color,              // defines location of clt data
+								v_offs,                  // int               v_offset,
+								h_offs,                  // int               h_offset,
 								dstride_rslt/sizeof(float));            //const size_t      dstride);            // in floats (pixels)
     				}
     			}
