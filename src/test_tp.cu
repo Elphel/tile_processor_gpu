@@ -140,18 +140,47 @@ float * alloc_image_gpu(size_t* dstride, // in bytes!!
     return image_gpu;
 }
 
+int get_file_size(std::string filename) // path to file
+{
+    FILE *p_file = NULL;
+    p_file = fopen(filename.c_str(),"rb");
+    fseek(p_file,0,SEEK_END);
+    int size = ftell(p_file);
+    fclose(p_file);
+    return size;
+}
 int readFloatsFromFile(float *       data, // allocated array
 					   const char *  path) // file path
 {
-
+    int fsize = get_file_size(path);
     std::ifstream input(path, std::ios::binary );
     // copies all data into buffer
     std::vector<char> buffer((
             std::istreambuf_iterator<char>(input)),
             (std::istreambuf_iterator<char>()));
     std::copy( buffer.begin(), buffer.end(), (char *) data);
+    printf("---- Bytes read: %d from %s\n", fsize, path);
 	return 0;
 }
+
+float * readAllFloatsFromFile(const char *  path,
+		int * len_in_floats) //
+{
+    int fsize = get_file_size(path);
+    float * data = (float *) malloc(fsize);
+    std::ifstream input(path, std::ios::binary );
+    std::vector<char> buffer((
+            std::istreambuf_iterator<char>(input)),
+            (std::istreambuf_iterator<char>()));
+    std::copy( buffer.begin(), buffer.end(), (char *) data);
+    printf("---- Bytes read: %d from %s\n", fsize, path);
+    * len_in_floats = fsize/sizeof(float);
+    return data;
+
+}
+
+
+
 int writeFloatsToFile(float *       data, // allocated array
 		               int           size, // length in elements
 					   const char *  path) // file path
@@ -261,6 +290,11 @@ int main(int argc, char **argv)
     const char* result_corr_file = "/data_ssd/git/tile_processor_gpu/clt/main_corr.corr";
     const char* result_textures_file =       "/data_ssd/git/tile_processor_gpu/clt/texture.rgba";
     const char* result_textures_rgba_file = "/data_ssd/git/tile_processor_gpu/clt/texture_rgba.rgba";
+
+    const char* rByRDist_file =            "/data_ssd/git/tile_processor_gpu/clt/main.rbyrdist";
+    const char* correction_vector_file =   "/data_ssd/git/tile_processor_gpu/clt/main.correction_vector";
+    const char* geometry_correction_file = "/data_ssd/git/tile_processor_gpu/clt/main.geometry_correction";
+
     // not yet used
     float lpf_sigmas[3] = {0.9f, 0.9f, 0.9f}; // G, B, G
 
@@ -274,18 +308,6 @@ int main(int argc, char **argv)
     int texture_colors = 3; // result will be 3+1 RGBA (for mono - 2)
 
 
-/*
-#define IMG_WIDTH    2592
-#define IMG_HEIGHT   1936
-#define NUM_CAMS        4
-#define NUM_COLORS      3
-#define KERNELS_STEP   16
-#define KERNELS_HOR   164
-#define KERNELS_VERT  123
-#define KERNEL_OFFSETS  8
-#define TILESX        324
-#define TILESY        242
-*/
 /*
     struct tp_task {
     	long task;
@@ -361,6 +383,39 @@ struct tp_task {
     size_t  dstride_textures; // in bytes ! for one rgba/ya 16x16 tile
     size_t  dstride_textures_rbga; // in bytes ! for one rgba/ya 16x16 tile
 
+    struct gc fgeometry_correction;
+    float*  correction_vector;
+    int     correction_vector_length;
+//    float rByRDist
+    float * rByRDist;
+    int     rByRDist_length;
+
+    float            * gpu_geometry_correction;
+    float            * gpu_correction_vector;
+    float            * gpu_rByRDist;
+
+    readFloatsFromFile(
+    		(float *) &fgeometry_correction, // float * data, // allocated array
+			geometry_correction_file); // 			   char *  path) // file path
+
+    rByRDist = readAllFloatsFromFile(
+    		rByRDist_file, // const char *  path,
+    		&rByRDist_length); // int * len_in_floats)
+    correction_vector =  readAllFloatsFromFile(
+    		correction_vector_file, // const char *  path,
+    		&correction_vector_length); // int * len_in_floats)
+
+    gpu_geometry_correction =  copyalloc_kernel_gpu(
+    		(float *) &fgeometry_correction,
+    		sizeof(fgeometry_correction)/sizeof(float));
+
+    gpu_correction_vector =  copyalloc_kernel_gpu(
+    		correction_vector,
+			correction_vector_length);
+
+    gpu_rByRDist =  copyalloc_kernel_gpu(
+    		rByRDist,
+			rByRDist_length);
 
     float lpf_rbg[3][64]; // not used
     for (int ncol = 0; ncol < 3; ncol++) {
@@ -1066,16 +1121,6 @@ struct tp_task {
 
 
 
-
-
-
-
-
-
-
-
-
-
 #ifdef SAVE_CLT
     free(cpu_clt);
 #endif
@@ -1106,7 +1151,12 @@ struct tp_task {
 	checkCudaErrors(cudaFree(gpu_woi));
 	checkCudaErrors(cudaFree(gpu_num_texture_tiles));
 
+	checkCudaErrors(cudaFree(gpu_geometry_correction));
+    checkCudaErrors(cudaFree(gpu_correction_vector));
+    checkCudaErrors(cudaFree(gpu_rByRDist));
 
+	free (rByRDist);
+	free (correction_vector);
 
 	exit(0);
 }
