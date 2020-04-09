@@ -71,6 +71,7 @@
 
 #define THREADS_DYNAMIC_BITS      5 // treads in block for CDP creation of the texture list
 
+#define DBG_DISPARITY            32.0 // disparity for which to calculate offsets (not needed in Java)
 //#undef HAS_PRINTF
 #define HAS_PRINTF
 //7

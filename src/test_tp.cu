@@ -293,6 +293,18 @@ int main(int argc, char **argv)
 		short tx;
 		float xy[NUM_CAMS][2];
     } ;
+struct tp_task {
+	int   task;
+	union {
+		int      txy;
+		unsigned short sxy[2];
+	};
+	float xy[NUM_CAMS][2];
+	float target_disparity;
+	float disp_dist[NUM_CAMS][4]; // calculated with getPortsCoordinates()
+};
+
+
 */
     int KERN_TILES = KERNELS_HOR *  KERNELS_VERT * NUM_COLORS;
     int KERN_SIZE =  KERN_TILES * 4 * 64;
@@ -303,8 +315,8 @@ int main(int argc, char **argv)
 
 
     float            * host_kern_buf =  (float *)malloc(KERN_SIZE * sizeof(float));
-
-    struct tp_task     task_data [TILESX*TILESY]; // maximal length - each tile
+// static - see https://stackoverflow.com/questions/20253267/segmentation-fault-before-main
+    static struct tp_task     task_data [TILESX*TILESY]; // maximal length - each tile
     int                corr_indices         [NUM_PAIRS*TILESX*TILESY];
 //    int                texture_indices      [TILESX*TILESY];
     int                texture_indices      [TILESX*TILESYA];
@@ -422,6 +434,7 @@ int main(int argc, char **argv)
             for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
                 task_data[nt].xy[ncam][0] = tile_coords_h[ncam][nt][0];
                 task_data[nt].xy[ncam][1] = tile_coords_h[ncam][nt][1];
+                task_data[nt].target_disparity = DBG_DISPARITY;
             }
         }
     }
