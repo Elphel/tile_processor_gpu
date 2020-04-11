@@ -39,6 +39,7 @@
 // Avoiding includes in jcuda, all source files will be merged
 #pragma once
 #ifndef JCUDA
+#include <stdio.h>
 #define THREADSX         (DTT_SIZE)
 #define NUM_CAMS                  4
 #define NUM_PAIRS                 6
@@ -72,7 +73,11 @@
 #define THREADS_DYNAMIC_BITS      5 // treads in block for CDP creation of the texture list
 
 #define DBG_DISPARITY            32.0 // disparity for which to calculate offsets (not needed in Java)
-#define RBYRDIST_LEN          20001   // length of
+#define RBYRDIST_LEN           5001   // for doubles 10001 - floats   // length of rByRDist to allocate shared memory
+#define RBYRDIST_STEP             0.0004 // for doubles, 0.0002 - floats // to fit into GPU shared memory (was 0.001);
+#define TILES_PER_BLOCK_GEOM     32   // each tile has NUM_CAMS threads
+
+
 //#undef HAS_PRINTF
 #define HAS_PRINTF
 //7
@@ -87,10 +92,15 @@
 #define DEBUG8 1
 #define DEBUG9 1
 */
-#define DEBUG10 1
-#define DEBUG11 1
-#define DEBUG12 1
+//textures
+//#define DEBUG10 1
+//#define DEBUG11 1
+//#define DEBUG12 1
 //#define USE_textures_gen
-#define DEBUG_OOB1 1
+//#define DEBUG_OOB1 1
+// geom
+#define DEBUG20 1
+
+
 #endif //#ifndef JCUDA
 

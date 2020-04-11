@@ -44,6 +44,7 @@
 
 //#include "dtt8x8.cuh"
 #include "dtt8x8.h"
+#include "geometry_correction.h"
 #include "TileProcessor.cuh"
 ///#include "cuda_profiler_api.h"
 //#include "cudaProfiler.h"
@@ -339,6 +340,7 @@ struct tp_task {
     float            * host_kern_buf =  (float *)malloc(KERN_SIZE * sizeof(float));
 // static - see https://stackoverflow.com/questions/20253267/segmentation-fault-before-main
     static struct tp_task     task_data [TILESX*TILESY]; // maximal length - each tile
+    union  trot_deriv  rot_deriv;
     int                corr_indices         [NUM_PAIRS*TILESX*TILESY];
 //    int                texture_indices      [TILESX*TILESY];
     int                texture_indices      [TILESX*TILESYA];
@@ -386,13 +388,13 @@ struct tp_task {
     struct gc fgeometry_correction;
     float*  correction_vector;
     int     correction_vector_length;
-//    float rByRDist
     float * rByRDist;
     int     rByRDist_length;
 
-    float            * gpu_geometry_correction;
-    float            * gpu_correction_vector;
-    float            * gpu_rByRDist;
+    struct gc          * gpu_geometry_correction;
+    struct corr_vector * gpu_correction_vector;
+    float              * gpu_rByRDist;
+    union trot_deriv   * gpu_rot_deriv;
 
     readFloatsFromFile(
     		(float *) &fgeometry_correction, // float * data, // allocated array
@@ -405,17 +407,19 @@ struct tp_task {
     		correction_vector_file, // const char *  path,
     		&correction_vector_length); // int * len_in_floats)
 
-    gpu_geometry_correction =  copyalloc_kernel_gpu(
+    gpu_geometry_correction =  (struct gc *) copyalloc_kernel_gpu(
     		(float *) &fgeometry_correction,
     		sizeof(fgeometry_correction)/sizeof(float));
 
-    gpu_correction_vector =  copyalloc_kernel_gpu(
+    gpu_correction_vector =  (struct corr_vector * ) copyalloc_kernel_gpu(
     		correction_vector,
 			correction_vector_length);
 
     gpu_rByRDist =  copyalloc_kernel_gpu(
     		rByRDist,
 			rByRDist_length);
+
+    checkCudaErrors(cudaMalloc((void **)&gpu_rot_deriv, sizeof(trot_deriv)));
 
     float lpf_rbg[3][64]; // not used
     for (int ncol = 0; ncol < 3; ncol++) {
@@ -597,6 +601,125 @@ struct tp_task {
     gpu_clt =            copyalloc_pointers_gpu (gpu_clt_h,         NUM_CAMS);
 //    gpu_corr_images =    copyalloc_pointers_gpu (gpu_corr_images_h, NUM_CAMS);
 
+
+#ifdef DBG_TILE
+    const int numIterations = 1; //0;
+    const int i0 =  0; // -1;
+#else
+    const int numIterations = 10; // 0; //0;
+    const int i0 = -1; // 0; // -1;
+#endif
+
+#define TEST_ROT_MATRICES
+#ifdef  TEST_ROT_MATRICES
+//    dim3 threads_rot(3,3,NUM_CAMS);
+//   dim3 grid_rot   (1, 1, 1);
+    dim3 threads_rot(3,3,3);
+    dim3 grid_rot   (NUM_CAMS, 1, 1);
+
+    printf("ROT_MATRICES: threads_list=(%d, %d, %d)\n",threads_rot.x,threads_rot.y,threads_rot.z);
+    printf("ROT_MATRICES: grid_list=(%d, %d, %d)\n",grid_rot.x,grid_rot.y,grid_rot.z);
+    StopWatchInterface *timerROT_MATRICES = 0;
+    sdkCreateTimer(&timerROT_MATRICES);
+    for (int i = i0; i < numIterations; i++)
+    {
+    	if (i == 0)
+    	{
+    		checkCudaErrors(cudaDeviceSynchronize());
+    		sdkResetTimer(&timerROT_MATRICES);
+    		sdkStartTimer(&timerROT_MATRICES);
+    	}
+
+//    	calc_rot_matrices<<<grid_rot,threads_rot>>> (
+//    			gpu_correction_vector);   // 		struct corr_vector * gpu_correction_vector,
+
+    	calc_rot_deriv<<<grid_rot,threads_rot>>> (
+    			(corr_vector * ) gpu_correction_vector ,           // 		struct corr_vector * gpu_correction_vector,
+    			(trot_deriv  * ) gpu_rot_deriv);                  // union trot_deriv   * gpu_rot_deriv);
+
+
+    	getLastCudaError("Kernel failure");
+    	checkCudaErrors(cudaDeviceSynchronize());
+    	printf("test pass: %d\n",i);
+    }
+    ///	cudaProfilerStop();
+    sdkStopTimer(&timerROT_MATRICES);
+    float avgTimeROT_MATRICES = (float)sdkGetTimerValue(&timerROT_MATRICES) / (float)numIterations;
+    sdkDeleteTimer(&timerROT_MATRICES);
+    printf("Average calc_rot_matrices run time =%f ms\n",  avgTimeROT_MATRICES);
+	checkCudaErrors(cudaMemcpy(
+			&rot_deriv,
+			gpu_rot_deriv,
+			sizeof(trot_deriv),
+			cudaMemcpyDeviceToHost));
+	const char* matrices_names[] = {
+	    		"rot","d_daz","d_tilt","d_roll","d_zoom"};
+    for (int i = 0; i < 5;i++){
+		printf("Matrix %s for camera\n",matrices_names[i]);
+		for (int row = 0; row<3; row++){
+			for (int ncam = 0; ncam<NUM_CAMS;ncam++){
+				for (int col = 0; col <3; col++){
+					printf("%9.6f,",rot_deriv.matrices[i][ncam][row][col]);
+					if (col == 2){
+						if (ncam == (NUM_CAMS-1)){
+							printf("\n");
+						} else {
+							printf("   ");
+						}
+					} else {
+						printf(" ");
+					}
+				}
+			}
+		}
+    }
+
+
+#endif // TEST_ROT_MATRICES
+
+
+
+
+
+#define TEST_GEOM_CORR
+#ifdef  TEST_GEOM_CORR
+    dim3 threads_geom(TILES_PER_BLOCK_GEOM,1, 1);
+    dim3 grid_geom   ((tp_task_size+TILES_PER_BLOCK_GEOM-1)/TILES_PER_BLOCK_GEOM, 1, 1);
+    printf("GEOM: threads_list=(%d, %d, %d)\n",threads_geom.x,threads_geom.y,threads_geom.z);
+    printf("GEOM: grid_list=(%d, %d, %d)\n",grid_geom.x,grid_geom.y,grid_geom.z);
+    StopWatchInterface *timerGEOM = 0;
+    sdkCreateTimer(&timerGEOM);
+    for (int i = i0; i < numIterations; i++)
+    {
+    	if (i == 0)
+    	{
+    		checkCudaErrors(cudaDeviceSynchronize());
+    		sdkResetTimer(&timerGEOM);
+    		sdkStartTimer(&timerGEOM);
+    	}
+
+    	get_tiles_offsets<<<grid_geom,threads_geom>>> (
+    			gpu_tasks,                // struct tp_task   * gpu_tasks,
+				tp_task_size,             // int                num_tiles,          // number of tiles in task list
+				gpu_geometry_correction, // 		struct gc          * gpu_geometry_correction,
+				gpu_correction_vector,   // 		struct corr_vector * gpu_correction_vector,
+				gpu_rByRDist); // 		float *              gpu_rByRDist)      // length should match RBYRDIST_LEN
+
+    	getLastCudaError("Kernel failure");
+    	checkCudaErrors(cudaDeviceSynchronize());
+    	printf("test pass: %d\n",i);
+    }
+    ///	cudaProfilerStop();
+    sdkStopTimer(&timerGEOM);
+    float avgTimeGEOM = (float)sdkGetTimerValue(&timerGEOM) / (float)numIterations;
+    sdkDeleteTimer(&timerGEOM);
+    printf("Average TextureList run time =%f ms\n",  avgTimeGEOM);
+#endif // TEST_GEOM_CORR
+
+
+
+
+
     //create and start CUDA timer
     StopWatchInterface *timerTP = 0;
     sdkCreateTimer(&timerTP);
@@ -607,28 +730,23 @@ struct tp_task {
     printf("threads_tp=(%d, %d, %d)\n",threads_tp.x,threads_tp.y,threads_tp.z);
     printf("grid_tp=   (%d, %d, %d)\n",grid_tp.x,   grid_tp.y,   grid_tp.z);
 
-#ifdef DBG_TILE
-    const int numIterations = 1; //0;
-    const int i0 =  0; // -1;
-#else
-    const int numIterations = 10; // 0; //0;
-    const int i0 = -1; // 0; // -1;
-#endif
+
+
     cudaFuncSetCacheConfig(convert_correct_tiles, cudaFuncCachePreferShared);
-///    cudaProfilerStart();
+    ///    cudaProfilerStart();
     float ** fgpu_kernel_offsets = (float **) gpu_kernel_offsets; //    [NUM_CAMS];
 
     for (int i = i0; i < numIterations; i++)
     {
-        if (i == 0)
-        {
-            checkCudaErrors(cudaDeviceSynchronize());
-            sdkResetTimer(&timerTP);
-            sdkStartTimer(&timerTP);
-        }
+    	if (i == 0)
+    	{
+    		checkCudaErrors(cudaDeviceSynchronize());
+    		sdkResetTimer(&timerTP);
+    		sdkStartTimer(&timerTP);
+    	}
 
-        convert_correct_tiles<<<grid_tp,threads_tp>>>(
-        		fgpu_kernel_offsets,    // struct CltExtra      ** gpu_kernel_offsets,
+    	convert_correct_tiles<<<grid_tp,threads_tp>>>(
+    			fgpu_kernel_offsets,    // struct CltExtra      ** gpu_kernel_offsets,
 				gpu_kernels,           // 		float           ** gpu_kernels,
 				gpu_images,            // 		float           ** gpu_images,
 				gpu_tasks,             // 		struct tp_task  * gpu_tasks,
@@ -638,11 +756,11 @@ struct tp_task {
 				0); // 7); // 0); // 7);                    //       int               lpf_mask)            // apply lpf to colors : bit 0 - red, bit 1 - blue, bit2 - green
 
 
-        getLastCudaError("Kernel execution failed");
-        checkCudaErrors(cudaDeviceSynchronize());
-        printf("%d\n",i);
+    	getLastCudaError("Kernel execution failed");
+    	checkCudaErrors(cudaDeviceSynchronize());
+    	printf("%d\n",i);
     }
-//    checkCudaErrors(cudaDeviceSynchronize());
+    //    checkCudaErrors(cudaDeviceSynchronize());
     sdkStopTimer(&timerTP);
     float avgTime = (float)sdkGetTimerValue(&timerTP) / (float)numIterations;
     sdkDeleteTimer(&timerTP);
@@ -1154,6 +1272,8 @@ struct tp_task {
 	checkCudaErrors(cudaFree(gpu_geometry_correction));
     checkCudaErrors(cudaFree(gpu_correction_vector));
     checkCudaErrors(cudaFree(gpu_rByRDist));
+    checkCudaErrors(cudaFree(gpu_rot_deriv));
+
 
 	free (rByRDist);
 	free (correction_vector);
