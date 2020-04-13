@@ -341,7 +341,7 @@ struct tp_task {
 // static - see https://stackoverflow.com/questions/20253267/segmentation-fault-before-main
     static struct tp_task     task_data  [TILESX*TILESY]; // maximal length - each tile
     static struct tp_task     task_data1 [TILESX*TILESY]; // maximal length - each tile
-    union  trot_deriv  rot_deriv;
+    trot_deriv  rot_deriv;
     int                corr_indices         [NUM_PAIRS*TILESX*TILESY];
 //    int                texture_indices      [TILESX*TILESY];
     int                texture_indices      [TILESX*TILESYA];
@@ -395,7 +395,7 @@ struct tp_task {
     struct gc          * gpu_geometry_correction;
     struct corr_vector * gpu_correction_vector;
     float              * gpu_rByRDist;
-    union trot_deriv   * gpu_rot_deriv;
+    trot_deriv   * gpu_rot_deriv;
 
     readFloatsFromFile(
     		(float *) &fgeometry_correction, // float * data, // allocated array
@@ -660,7 +660,13 @@ struct tp_task {
 		for (int row = 0; row<3; row++){
 			for (int ncam = 0; ncam<NUM_CAMS;ncam++){
 				for (int col = 0; col <3; col++){
+
+#ifdef NVRTC_BUG
+					//abuse - exceeding first dimension
+					printf("%9.6f,",rot_deriv.rots[i*NUM_CAMS+ncam][row][col]);
+#else
 					printf("%9.6f,",rot_deriv.matrices[i][ncam][row][col]);
+#endif
 					if (col == 2){
 						if (ncam == (NUM_CAMS-1)){
 							printf("\n");

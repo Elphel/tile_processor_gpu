@@ -322,7 +322,7 @@ __constant__ int offset_tmp =      12; // 12..15
  */
 extern "C" __global__ void calc_rot_deriv(
 		struct corr_vector * gpu_correction_vector,
-		union trot_deriv   * gpu_rot_deriv)
+		trot_deriv   * gpu_rot_deriv)
 {
 //	__shared__ float zoom;
 	__shared__ float sincos  [4][2];    // {az,tilt,roll, d_az, d_tilt, d_roll, d_az}{cos,sin}
@@ -446,11 +446,21 @@ extern "C" __global__ void calc_rot_deriv(
 // copy results to global memory
 	int gindx = threadIdx.z;
 	int lindx = offset_rots + threadIdx.z;
+#ifdef NVRTC_BUG
+	// going beyond first dimension
+	gpu_rot_deriv->rots[ncam + gindx * NUM_CAMS][threadIdx.y][threadIdx.x] = matrices[lindx][threadIdx.y][threadIdx.x];
+#else
 	gpu_rot_deriv->matrices[gindx][ncam][threadIdx.y][threadIdx.x] = matrices[lindx][threadIdx.y][threadIdx.x];
+#endif
 	gindx +=3;
 	lindx+=3;
 	if (lindx < 5) {
+#ifdef NVRTC_BUG
+	// going beyond first dimension
+		gpu_rot_deriv->rots[ncam + gindx * NUM_CAMS][threadIdx.y][threadIdx.x] = matrices[lindx][threadIdx.y][threadIdx.x];
+#else
 		gpu_rot_deriv->matrices[gindx][ncam][threadIdx.y][threadIdx.x] = matrices[lindx][threadIdx.y][threadIdx.x];
+#endif
 	}
 	__syncthreads();
 #ifdef DEBUG21
@@ -476,10 +486,13 @@ extern "C" __global__ void get_tiles_offsets(
 		struct gc          * gpu_geometry_correction,
 		struct corr_vector * gpu_correction_vector,
 		float *              gpu_rByRDist,      // length should match RBYRDIST_LEN
-		union trot_deriv   * gpu_rot_deriv)
+		trot_deriv   * gpu_rot_deriv)
 {
 //	int task_num = blockIdx.x * blockDim.x + threadIdx.x; //  blockIdx.x * TILES_PER_BLOCK_GEOM + threadIdx.x
 	int task_num = blockIdx.x * blockDim.y + threadIdx.y; //  blockIdx.x * TILES_PER_BLOCK_GEOM + threadIdx.y
+	if (task_num >= num_tiles){
+		return;
+	}
 	int thread_xy = blockDim.x * threadIdx.y + threadIdx.x;
 	int ncam = threadIdx.x;
 	// threadIdx.x - numcam, used for per-camera
@@ -645,11 +658,18 @@ extern "C" __global__ void get_tiles_offsets(
 	float rD2rND = 1.0;
 	{
 		float rri = 1.0;
+#ifdef NVRTC_BUG
 #pragma unroll
+		for (int j = 0; j < RAD_COEFF_LEN; j++){
+			rri *= ri;
+			rD2rND +=  ((float *) &geometry_correction.distortionC)[j]*(rri - 1.0);
+		}
+#else
 		for (int j = 0; j < sizeof(geometry_correction.rad_coeff)/sizeof(float); j++){
 			rri *= ri;
 			rD2rND += geometry_correction.rad_coeff[j]*(rri - 1.0);
 		}
+#endif
 	}
 	// Get port pixel coordinates by scaling the 2d vector with Rdistorted/Dnondistorted coefficient)
 	float pXid = pXci * rD2rND;
@@ -759,15 +779,23 @@ extern "C" __global__ void get_tiles_offsets(
 				disp_dist[i][3] =   dd2.get(1, 1);
 
  */
-
+//#undef NVRTC_BUG
 	float drD2rND_dri = 0.0;
 	{
 		float rri = 1.0;
+#ifdef NVRTC_BUG
+#pragma unroll
+		for (int j = 0; j < RAD_COEFF_LEN; j++){
+			drD2rND_dri += ((float *) &geometry_correction.distortionC)[j] * (j+1) * rri;
+			rri *= ri;
+		}
+#else
 #pragma unroll
 		for (int j = 0; j < sizeof(geometry_correction.rad_coeff)/sizeof(float); j++){
 			drD2rND_dri += geometry_correction.rad_coeff[j] * (j+1) * rri;
 			rri *= ri;
 		}
+#endif
 	}
 	float scale_distort00 = rD2rND + ri* drD2rND_dri;
 	float scale_distort11 = rD2rND;
