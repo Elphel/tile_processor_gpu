@@ -72,10 +72,22 @@
 
 #define THREADS_DYNAMIC_BITS      5 // treads in block for CDP creation of the texture list
 
-#define DBG_DISPARITY            32.0 // disparity for which to calculate offsets (not needed in Java)
+#define DBG_DISPARITY            56.0 // disparity for which to calculate offsets (not needed in Java)
 #define RBYRDIST_LEN           5001   // for doubles 10001 - floats   // length of rByRDist to allocate shared memory
 #define RBYRDIST_STEP             0.0004 // for doubles, 0.0002 - floats // to fit into GPU shared memory (was 0.001);
-#define TILES_PER_BLOCK_GEOM     32   // each tile has NUM_CAMS threads
+#define TILES_PER_BLOCK_GEOM     (32/NUM_CAMS)   // each tile has NUM_CAMS threads
+
+
+// Use CORR_OUT_RAD for the correlation output
+
+//#define DBG_TILE_X     40
+//#define DBG_TILE_Y     80
+#define DBG_TILE_X     151 // 161 // 49
+#define DBG_TILE_Y     69  // 111 // 66
+
+#define DBG_TILE    (DBG_TILE_Y * 324 + DBG_TILE_X)
+#undef DBG_MARK_DBG_TILE
+
 
 
 //#undef HAS_PRINTF
@@ -99,7 +111,9 @@
 //#define USE_textures_gen
 //#define DEBUG_OOB1 1
 // geom
-#define DEBUG20 1
+//#define DEBUG20 1
+
+#define DEBUG21 1
 
 
 #endif //#ifndef JCUDA

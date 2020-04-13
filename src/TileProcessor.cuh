@@ -110,14 +110,6 @@ GPU run time =523.451927ms, (direct conversion: 24.080189999999998ms, imclt: 17.
 
 #define MCLT_UNION_LEN   (DTT_SIZE2 * (DTT_SIZE2 + 2))
 
-// Use CORR_OUT_RAD for the correlation output
-//#define DBG_TILE_X     40
-//#define DBG_TILE_Y     80
-#define DBG_TILE_X     161 // 49
-#define DBG_TILE_Y     111 // 66
-
-#define DBG_TILE    (DBG_TILE_Y * 324 + DBG_TILE_X)
-#undef DBG_MARK_DBG_TILE
 
 //56494
 // struct tp_task
@@ -1150,6 +1142,7 @@ __global__ void generate_RBGA(
 			int                height, // <= TILESY, use for faster processing of LWIR images
 // Parameters for the texture generation
 			float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
+			// TODO: use geometry_correction rXY !
 			float           * gpu_port_offsets,       // relative ports x,y offsets - just to scale differences, may be approximate
 			int               colors,             // number of colors (3/1)
 			int               is_lwir,            // do not perform shot correction
@@ -1900,11 +1893,11 @@ __global__ void textures_gen(
 #endif // ifdef USE_textures_gen
 extern "C"
 __global__ void textures_accumulate(
-//		int               border_tile,        // if 1 - watch for border
 		int             * woi,                // x, y, width,height
 		float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 		size_t            num_texture_tiles,  // number of texture tiles to process
 		int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
+		// TODO: use geometry_correction rXY !
 		float           * gpu_port_offsets,       // relative ports x,y offsets - just to scale differences, may be approximate
 		int               colors,             // number of colors (3/1)
 		int               is_lwir,            // do not perform shot correction
@@ -2006,14 +1999,21 @@ __global__ void textures_accumulate(
 		}
 		__syncthreads();// __syncwarp();
 #endif
-		// perform idct
+
+#ifdef DBG_TILE		// perform idct
 		imclt8threads(
 				0,          // int     do_acc,     // 1 - add to previous value, 0 - overwrite
 				clt_tile,   //        [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports [4][8][9]
 				mclt_tile,  // float * mclt_tile )
 				((tile_num == DBG_TILE)  && (threadIdx.x == 0)));
+#else
+		imclt8threads(
+				0,          // int     do_acc,     // 1 - add to previous value, 0 - overwrite
+				clt_tile,   //        [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports [4][8][9]
+				mclt_tile,  // float * mclt_tile )
+				0);
+#endif
 		__syncthreads();// __syncwarp();
-
 #ifdef DEBUG7
 		if ((tile_num == DBG_TILE)  && (threadIdx.x == 0) && (threadIdx.y == 0)){
 			printf("\ntextures_gen mclt color = %d\n",color);
@@ -2024,6 +2024,7 @@ __global__ void textures_accumulate(
 		__syncthreads();// __syncwarp();
 #endif
 		if (colors > 1) {
+#ifdef DBG_TILE
 			debayer_shot(
 					(color < 2), // const int rb_mode,    // 0 - green, 1 - r/b
 					min_shot,    // float     min_shot,   // 10.0
@@ -2032,6 +2033,16 @@ __global__ void textures_accumulate(
 					mclt_dst,    // float   * mclt_dst,   // [2* DTT_SIZE][DTT_SIZE1+ DTT_SIZE], // +1 to alternate column ports[16][17]
 					mclt_tmp,    // float   * mclt_tmp,
 					((tile_num == DBG_TILE)  && (threadIdx.x == 0))); // int debug);
+#else
+			debayer_shot(
+					(color < 2), // const int rb_mode,    // 0 - green, 1 - r/b
+					min_shot,    // float     min_shot,   // 10.0
+					scale_shot,  // float     scale_shot, // 3.0 (0.0 for mono)
+					mclt_tile,   // float   * mclt_src,   // [2* DTT_SIZE][DTT_SIZE1+ DTT_SIZE], // +1 to alternate column ports[16][17]
+					mclt_dst,    // float   * mclt_dst,   // [2* DTT_SIZE][DTT_SIZE1+ DTT_SIZE], // +1 to alternate column ports[16][17]
+					mclt_tmp,    // float   * mclt_tmp,
+					0); // int debug);
+#endif
 			__syncthreads();// __syncwarp();
 		} else {
 			// copy? - no, just remember to use mclt_tile, not mclt_dst
@@ -2105,6 +2116,7 @@ __global__ void textures_accumulate(
 	__syncthreads();// __syncwarp();
 #endif
 //	__shared__ float mclt_tiles [NUM_CAMS][NUM_COLORS][2*DTT_SIZE][DTT_SIZE21];
+#ifdef DBG_TILE
 	tile_combine_rgba(
 			colors,                    // int     colors,        // number of colors
 			(float*) shr.mclt_debayer, // float * mclt_tile,     // debayer // has gaps to align with union !
@@ -2120,7 +2132,23 @@ __global__ void textures_accumulate(
 			dust_remove,               // int     dust_remove,    // Do not reduce average weight when only one image differes much from the average
 			keep_weights,              // int     keep_weights,   // return channel weights and rms after A in RGBA (weight are always calculated)
 			(tile_num == DBG_TILE) );  //int     debug );
-
+#else
+	tile_combine_rgba(
+			colors,                    // int     colors,        // number of colors
+			(float*) shr.mclt_debayer, // float * mclt_tile,     // debayer // has gaps to align with union !
+			(float*) mclt_tiles,       // float * rbg_tile,      // if not null - original (not-debayered) rbg tile to use for the output
+			(float *) shr1.rgbaw,      // float * rgba,          // result
+			(float * ) 0,              // float * ports_rgb,     // average values of R,G,B for each camera (R0,R1,...,B2,B3) // null
+			(float * ) 0,              // float * max_diff,      // maximal (weighted) deviation of each channel from the average /null
+			(float *) port_offsets,    // float * port_offsets,  // [port]{x_off, y_off} - just to scale pixel value differences
+			diff_sigma,                // float   diff_sigma,     // pixel value/pixel change
+			diff_threshold,            // float   diff_threshold, // pixel value/pixel change
+			min_agree,                 // float   min_agree,   NOT USED?   // minimal number of channels to agree on a point (real number to work with fuzzy averages)
+			weights,                   // float * chn_weights,    // color channel weights, sum == 1.0
+			dust_remove,               // int     dust_remove,    // Do not reduce average weight when only one image differes much from the average
+			keep_weights,              // int     keep_weights,   // return channel weights and rms after A in RGBA (weight are always calculated)
+			0);  //int     debug );
+#endif
 // return either only 4 slices (RBGA) or all 12 (with weights and rms) if keep_weights
 // float rgbaw              [NUM_COLORS + 1 + NUM_CAMS + NUM_COLORS + 1][DTT_SIZE2][DTT_SIZE21];
 //	size_t texture_tile_offset = + tile_indx * texture_stride;

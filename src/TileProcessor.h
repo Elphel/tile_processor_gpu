@@ -80,12 +80,12 @@ extern "C" __global__ void clear_texture_rbga(
 		const size_t      texture_rbga_stride,     // in floats 8*stride
 		float           * gpu_texture_tiles);  // (number of colors +1 + ?)*16*16 rgba texture tiles
 extern "C" __global__ void textures_accumulate(
-//		int               border_tile,        // if 1 - watch for border
 		int             * woi,                // x, y, width,height
 		float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 		size_t            num_texture_tiles,  // number of texture tiles to process
 		int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
-		float           * gpu_port_offsets,       // relative ports x,y offsets - just to scale differences, may be approximate
+		// TODO: use geometry_correction rXY !
+		float           * gpu_port_offsets,   // relative ports x,y offsets - just to scale differences, may be approximate
 		int               colors,             // number of colors (3/1)
 		int               is_lwir,            // do not perform shot correction
 		float             min_shot,           // 10.0
@@ -127,6 +127,7 @@ __global__ void generate_RBGA(
 			int                height, // <= TILESY, use for faster processing of LWIR images
 // Parameters for the texture generation
 			float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
+			// TODO: use geometry_correction rXY !
 			float           * gpu_port_offsets,       // relative ports x,y offsets - just to scale differences, may be approximate
 			int               colors,             // number of colors (3/1)
 			int               is_lwir,            // do not perform shot correction

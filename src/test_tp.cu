@@ -339,7 +339,8 @@ struct tp_task {
 
     float            * host_kern_buf =  (float *)malloc(KERN_SIZE * sizeof(float));
 // static - see https://stackoverflow.com/questions/20253267/segmentation-fault-before-main
-    static struct tp_task     task_data [TILESX*TILESY]; // maximal length - each tile
+    static struct tp_task     task_data  [TILESX*TILESY]; // maximal length - each tile
+    static struct tp_task     task_data1 [TILESX*TILESY]; // maximal length - each tile
     union  trot_deriv  rot_deriv;
     int                corr_indices         [NUM_PAIRS*TILESX*TILESY];
 //    int                texture_indices      [TILESX*TILESY];
@@ -634,8 +635,8 @@ struct tp_task {
 //    			gpu_correction_vector);   // 		struct corr_vector * gpu_correction_vector,
 
     	calc_rot_deriv<<<grid_rot,threads_rot>>> (
-    			(corr_vector * ) gpu_correction_vector ,           // 		struct corr_vector * gpu_correction_vector,
-    			(trot_deriv  * ) gpu_rot_deriv);                  // union trot_deriv   * gpu_rot_deriv);
+    			gpu_correction_vector ,           // 		struct corr_vector * gpu_correction_vector,
+    			gpu_rot_deriv);                  // union trot_deriv   * gpu_rot_deriv);
 
 
     	getLastCudaError("Kernel failure");
@@ -683,7 +684,7 @@ struct tp_task {
 
 #define TEST_GEOM_CORR
 #ifdef  TEST_GEOM_CORR
-    dim3 threads_geom(TILES_PER_BLOCK_GEOM,1, 1);
+    dim3 threads_geom(NUM_CAMS,TILES_PER_BLOCK_GEOM, 1);
     dim3 grid_geom   ((tp_task_size+TILES_PER_BLOCK_GEOM-1)/TILES_PER_BLOCK_GEOM, 1, 1);
     printf("GEOM: threads_list=(%d, %d, %d)\n",threads_geom.x,threads_geom.y,threads_geom.z);
     printf("GEOM: grid_list=(%d, %d, %d)\n",grid_geom.x,grid_geom.y,grid_geom.z);
@@ -703,7 +704,8 @@ struct tp_task {
 				tp_task_size,             // int                num_tiles,          // number of tiles in task list
 				gpu_geometry_correction, // 		struct gc          * gpu_geometry_correction,
 				gpu_correction_vector,   // 		struct corr_vector * gpu_correction_vector,
-				gpu_rByRDist); // 		float *              gpu_rByRDist)      // length should match RBYRDIST_LEN
+				gpu_rByRDist, // 		float *              gpu_rByRDist)      // length should match RBYRDIST_LEN
+				gpu_rot_deriv); // union trot_deriv   * gpu_rot_deriv);
 
     	getLastCudaError("Kernel failure");
     	checkCudaErrors(cudaDeviceSynchronize());
@@ -714,6 +716,38 @@ struct tp_task {
     float avgTimeGEOM = (float)sdkGetTimerValue(&timerGEOM) / (float)numIterations;
     sdkDeleteTimer(&timerGEOM);
     printf("Average TextureList run time =%f ms\n",  avgTimeGEOM);
+
+//    gpu_tasks = (struct tp_task  *) copyalloc_kernel_gpu((float * ) &task_data, tp_task_size * (sizeof(struct tp_task)/sizeof(float)));
+//    static struct tp_task     task_data1 [TILESX*TILESY]; // maximal length - each tile
+/// DBG_TILE
+
+	checkCudaErrors(cudaMemcpy( // copy modified/calculated tasks
+			&task_data1,
+			gpu_tasks,
+			tp_task_size * sizeof(struct tp_task),
+			cudaMemcpyDeviceToHost));
+	struct tp_task * old_task = &task_data [DBG_TILE];
+	struct tp_task * new_task = &task_data1[DBG_TILE];
+
+    printf("old_task txy = 0x%x\n",  task_data [DBG_TILE].txy);
+    printf("new_task txy = 0x%x\n",  task_data1[DBG_TILE].txy);
+
+    for (int ncam = 0; ncam < NUM_CAMS; ncam++){
+        printf("camera %d pX old %f new %f diff = %f\n", ncam,
+        		task_data [DBG_TILE].xy[ncam][0],  task_data1[DBG_TILE].xy[ncam][0],
+				task_data [DBG_TILE].xy[ncam][0] - task_data1[DBG_TILE].xy[ncam][0]);
+        printf("camera %d pY old %f new %f diff = %f\n", ncam,
+        		task_data [DBG_TILE].xy[ncam][1],  task_data1[DBG_TILE].xy[ncam][1],
+				task_data [DBG_TILE].xy[ncam][1]-  task_data1[DBG_TILE].xy[ncam][1]);
+    }
+#if 0
+    // temporarily restore tasks
+    checkCudaErrors(cudaMemcpy(
+    		gpu_tasks,
+			&task_data,
+			tp_task_size * sizeof(struct tp_task),
+            cudaMemcpyHostToDevice));
+#endif
 #endif // TEST_GEOM_CORR
 
 
