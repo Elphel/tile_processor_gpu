@@ -41,7 +41,6 @@
 #include "tp_defines.h"
 #endif
 
-#define FINE_MARGINS
 
 extern "C"
 __global__ void convert_correct_tiles(

@@ -2847,14 +2847,6 @@ __device__ void convertCorrectTile(
 
 	px = centerX - DTT_SIZE - (clt_extra->data_x + clt_extra->dxc_dx * kdx + clt_extra->dxc_dy * kdy) ; // fractional left corner
 	int itlx = (int) floorf(px +0.5f);
-#ifndef FINE_MARGINS
-	if (itlx < 0){
-		itlx &= 1; // for color - extend by pairs
-	}
-	if (itlx >= (IMG_WIDTH - DTT_SIZE)){
-		itlx = itlx & 1 +(IMG_WIDTH - DTT_SIZE - 2); // for color - extend by pairs
-	}
-#endif // #ifndef FINE_MARGINS
 	int_topleft [0] = itlx;
 	float shift_hor =  itlx - px;
 	residual_shift[0] = shift_hor;
@@ -2890,15 +2882,6 @@ __device__ void convertCorrectTile(
 
 	py = centerY - DTT_SIZE - (clt_extra->data_y + clt_extra->dyc_dx * kdx + clt_extra->dyc_dy * kdy) ; // fractional top corner
 	int itly = (int) floorf(py +0.5f);
-#ifndef FINE_MARGINS
-	if (itly < 0){
-		itly &= 1; // for color - extend by pairs
-	}
-	if (itly >= (IMG_HEIGHT - DTT_SIZE)){
-		itly = (itly & 1) +(IMG_HEIGHT - DTT_SIZE - 2); // for color - extend by pairs
-	}
-#endif // #ifndef FINE_MARGINS
-
 	int_topleft[1] = itly;
 
 #ifdef DEBUG_OOB11
@@ -2968,9 +2951,6 @@ __device__ void convertCorrectTile(
     	float *dct_buf = clt_tile + ((gpass << 1) * (DTT_SIZE * DTT_SIZE1));
     	float *dst_buf = clt_tile + (((gpass << 1) + 1) * (DTT_SIZE * DTT_SIZE1));   // **** only used for green
 
-///    	if ((col_tl >= 0) && ((col_tl < (IMG_WIDTH - DTT_SIZE * 2))) && (row_tl >= 0) && ((row_tl < (IMG_HEIGHT - DTT_SIZE * 2)))) {
-
-#ifdef FINE_MARGINS
     	int col_src = col_tl + local_col;
     	if (col_src < 0) {
     		col_src &= 1; // same Bayer
@@ -3003,44 +2983,6 @@ __device__ void convertCorrectTile(
 				image_p += dstride2;
 			}
 		}
-#else
-
-    	if ((col_tl >= 0) && ((col_tl <= (max_px - DTT_SIZE * 2))) && (row_tl >= 0) && ((row_tl <= (max_py - DTT_SIZE * 2)))) {
-    		float *image_p = gpu_images + dstride * (row_tl + local_row)+ col_tl + local_col;
-#pragma unroll
-    		for (int i = 0; i < 8; i++) {
-//    			float d = (*image_p) * window_vert_cos[local_row]; //warp illegal address (0,2,1)
-    			float d = (*image_p);
-    			d *= window_vert_cos[local_row]; //warp illegal address (0,2,1)
-
-    			int dtt_offset1 = dtt_offset + (dtt_offset >> 3); // converting for 9-long rows (DTT_SIZE1)
-    			dct_buf[dtt_offset1] = d * hwind_cos;
-    			dst_buf[dtt_offset1] = d * hwind_sin; // **** only used for green
-    			dtt_offset = ( dtt_offset + ((dtt_offset_inc & 0xf) << 3)) & 0x3f;
-    			dtt_offset_inc >>= 4;
-    			local_row += 2;
-    			image_p += dstride2;
-    		}
-    	} else { // handling border tiles (slower)
-    		int eff_col = (min(IMG_HEIGHT/2 -1, max(0, col_tl >> 1)) << 1) + (col_tl & 1);
-    		int row_lsb =  row_tl & 1;
-    		int row_pair = row_tl >> 1;
-    		float *image_p = gpu_images + dstride * local_row+ (eff_col + local_col);
-#pragma unroll
-    		for (int i = 0; i < 8; i++) {
-    			int eff_row = (min(IMG_WIDTH/2 - 1, max(0, row_pair + i)) << 1) + row_lsb;
-    			float d =  image_p[dstride * eff_row] * window_vert_cos[local_row];
-
-    			int dtt_offset1 = dtt_offset + (dtt_offset >> 3); // converting for 9-long rows (DTT_SIZE1)
-    			dct_buf[dtt_offset1] = d * hwind_cos;
-    			dst_buf[dtt_offset1] = d * hwind_sin; // **** only used for green
-
-    			dtt_offset = ( dtt_offset + ((dtt_offset_inc & 0xf) << 3)) & 0x3f;
-    			dtt_offset_inc >>= 4;
-    			local_row += 2;
-    		}
-    	}
-#endif // #ifdef FINE_MARGINS
     }
      __syncthreads();// __syncwarp();
 #ifdef DEBUG2
