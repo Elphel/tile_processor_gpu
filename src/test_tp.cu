@@ -308,27 +308,6 @@ int main(int argc, char **argv)
     int keep_texture_weights = 1; // try with 0 also
     int texture_colors = 3; // result will be 3+1 RGBA (for mono - 2)
 
-
-/*
-    struct tp_task {
-    	long task;
-		short ty;
-		short tx;
-		float xy[NUM_CAMS][2];
-    } ;
-struct tp_task {
-	int   task;
-	union {
-		int      txy;
-		unsigned short sxy[2];
-	};
-	float xy[NUM_CAMS][2];
-	float target_disparity;
-	float disp_dist[NUM_CAMS][4]; // calculated with getPortsCoordinates()
-};
-
-
-*/
     int KERN_TILES = KERNELS_HOR *  KERNELS_VERT * NUM_COLORS;
     int KERN_SIZE =  KERN_TILES * 4 * 64;
 

@@ -77,6 +77,7 @@
 #define RBYRDIST_STEP             0.0004 // for doubles, 0.0002 - floats // to fit into GPU shared memory (was 0.001);
 #define TILES_PER_BLOCK_GEOM     (32/NUM_CAMS)   // each tile has NUM_CAMS threads
 
+#define DEBUG_OOB1 1
 
 // Use CORR_OUT_RAD for the correlation output
 
