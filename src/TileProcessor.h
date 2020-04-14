@@ -109,6 +109,16 @@ extern "C" __global__ void textures_accumulate(
 		size_t            texture_stride,     // in floats (now 256*4 = 1024)
 		float           * gpu_texture_tiles); // (number of colors +1 + ?)*16*16 rgba texture tiles
 
+extern "C"
+__global__ void imclt_rbg_all(
+		float           ** gpu_clt,            // [NUM_CAMS][TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
+		float           ** gpu_corr_images,    // [NUM_CAMS][WIDTH, 3 * HEIGHT]
+		int                apply_lpf,
+		int                colors,
+		int                woi_twidth,
+		int                woi_theight,
+		const size_t       dstride);            // in floats (pixels)
+
 extern "C" __global__ void imclt_rbg(
 		float           * gpu_clt,            // [TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 		float           * gpu_rbg,            // WIDTH, 3 * HEIGHT
@@ -150,6 +160,4 @@ __global__ void generate_RBGA(
 			int               keep_weights,       // return channel weights after A in RGBA (was removed)
 			const size_t      texture_rbga_stride,     // in floats
 			float           * gpu_texture_tiles);  // (number of colors +1 + ?)*16*16 rgba texture tiles
-
-
 

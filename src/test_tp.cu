@@ -823,8 +823,8 @@ int main(int argc, char **argv)
 
 
     // testing imclt
-    dim3 threads_imclt(IMCLT_THREADS_PER_TILE, IMCLT_TILES_PER_BLOCK, 1);
-    printf("threads_imclt=(%d, %d, %d)\n",threads_imclt.x,threads_imclt.y,threads_imclt.z);
+//    dim3 threads_imclt(IMCLT_THREADS_PER_TILE, IMCLT_TILES_PER_BLOCK, 1);
+//    printf("threads_imclt=(%d, %d, %d)\n",threads_imclt.x,threads_imclt.y,threads_imclt.z);
     StopWatchInterface *timerIMCLT = 0;
     sdkCreateTimer(&timerIMCLT);
 
@@ -836,7 +836,23 @@ int main(int argc, char **argv)
     		sdkResetTimer(&timerIMCLT);
     		sdkStartTimer(&timerIMCLT);
     	}
-
+#define CDP1
+#ifdef CDP1
+        dim3 threads_imclt_all(1, 1, 1);
+		dim3 grid_imclt_all(1, 1, 1);
+        printf("threads_imclt_all=(%d, %d, %d)\n",threads_imclt_all.x,threads_imclt_all.y,threads_imclt_all.z);
+        printf("grid_imclt_all=   (%d, %d, %d)\n",grid_imclt_all.x,   grid_imclt_all.y,   grid_imclt_all.z);
+        imclt_rbg_all<<<grid_imclt_all,threads_imclt_all>>>(
+        		gpu_clt,                     // float           ** gpu_clt,            // [NUM_CAMS][TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
+				gpu_corr_images,             // float           ** gpu_corr_images,    // [NUM_CAMS][WIDTH, 3 * HEIGHT]
+				1,                           // int               apply_lpf,
+				NUM_COLORS,                  // int               colors,               // defines lpf filter
+				TILESX,                      // int               woi_twidth,
+				TILESY,                      // int               woi_theight,
+				dstride_rslt/sizeof(float)); // const size_t      dstride);            // in floats (pixels)
+#else
+        dim3 threads_imclt(IMCLT_THREADS_PER_TILE, IMCLT_TILES_PER_BLOCK, 1);
+        printf("threads_imclt=(%d, %d, %d)\n",threads_imclt.x,threads_imclt.y,threads_imclt.z);
     	for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
     		for (int color = 0; color < NUM_COLORS; color++) {
     			for (int v_offs = 0; v_offs < 2; v_offs++){
@@ -861,6 +877,7 @@ int main(int argc, char **argv)
     			}
     		}
     	}
+#endif
     	getLastCudaError("Kernel failure");
     	checkCudaErrors(cudaDeviceSynchronize());
     	printf("test pass: %d\n",i);

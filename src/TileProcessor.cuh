@@ -2055,7 +2055,34 @@ __global__ void imclt_rbg_all(
 		int                woi_theight,
 		const size_t       dstride)            // in floats (pixels)
 {
-
+	dim3 threads_imclt(IMCLT_THREADS_PER_TILE, IMCLT_TILES_PER_BLOCK, 1);
+	if (threadIdx.x == 0) { // anyway 1,1,1
+		for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
+			for (int color = 0; color < colors; color++) {
+				for (int v_offs = 0; v_offs < 2; v_offs++){
+					for (int h_offs = 0; h_offs < 2; h_offs++){
+						int tilesy_half = (woi_theight + (v_offs ^ 1)) >> 1;
+						int tilesx_half = (woi_twidth + (h_offs ^ 1)) >> 1;
+						int tiles_in_pass = tilesy_half * tilesx_half;
+						dim3 grid_imclt((tiles_in_pass + IMCLT_TILES_PER_BLOCK-1) / IMCLT_TILES_PER_BLOCK,1,1);
+						//    				printf("grid_imclt=   (%d, %d, %d)\n",grid_imclt.x,   grid_imclt.y,   grid_imclt.z);
+						imclt_rbg<<<grid_imclt,threads_imclt>>>(
+								gpu_clt[ncam],         // float           * gpu_clt,     // [TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
+								gpu_corr_images[ncam], // float           * gpu_rbg,     // WIDTH, 3 * HEIGHT
+								1,                     // int               apply_lpf,
+								colors,                // int               colors,      // defines lpf filter
+								color,                 // int               color,       // defines location of clt data
+								v_offs,                // int               v_offset,
+								h_offs,                // int               h_offset,
+								woi_twidth,            // int               woi_twidth,  // will increase by DTT_SIZE (todo - cut away?)
+								woi_theight,           // int               woi_theight, // will increase by DTT_SIZE (todo - cut away?)
+								dstride);              // const size_t      dstride);    // in floats (pixels)
+						cudaDeviceSynchronize();
+					}
+				}
+			}
+		}
+	}
 }
 
 
