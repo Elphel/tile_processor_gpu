@@ -333,9 +333,7 @@ int main(int argc, char **argv)
     float              tile_coords_h        [NUM_CAMS][TILESX * TILESY][2];
     float            * gpu_clt_h            [NUM_CAMS];
     float            * gpu_lpf_h            [NUM_COLORS]; // never used
-#ifndef NOICLT
     float            * gpu_corr_images_h    [NUM_CAMS];
-#endif
 
     float            * gpu_corrs;
     int              * gpu_corr_indices;
@@ -353,8 +351,9 @@ int main(int argc, char **argv)
     float           ** gpu_kernels; //           [NUM_CAMS];
     struct CltExtra ** gpu_kernel_offsets; //    [NUM_CAMS];
     float           ** gpu_images; //            [NUM_CAMS];
-    float           ** gpu_clt;    //           [NUM_CAMS];
-    float           ** gpu_lpf;    //           [NUM_CAMS]; // never referenced
+    float           ** gpu_clt;    //            [NUM_CAMS];
+    float           ** gpu_corr_images; //       [NUM_CAMS];
+    float           ** gpu_lpf;    //            [NUM_CAMS]; // never referenced
 
     // GPU pointers to GPU memory
 //    float * gpu_tasks;
@@ -433,12 +432,10 @@ int main(int argc, char **argv)
 
         // Image is extended by 4 pixels each side to avoid checking (mclt tiles extend by 4)
         //host array of pointers to GPU arrays
-#ifndef NOICLT
         gpu_corr_images_h[ncam] = alloc_image_gpu(
         		&dstride_rslt,                // size_t* dstride, // in bytes!!
 				IMG_WIDTH + DTT_SIZE,         // int width,
 				3*(IMG_HEIGHT + DTT_SIZE));   // int height);
-#endif
     }
     // allocates one correlation kernel per line (15x15 floats), number of rows - number of tiles * number of pairs
     gpu_corrs = alloc_image_gpu(
@@ -579,7 +576,7 @@ int main(int argc, char **argv)
     gpu_kernel_offsets = (struct CltExtra **) copyalloc_pointers_gpu ((float **) gpu_kernel_offsets_h, NUM_CAMS);
     gpu_images =         copyalloc_pointers_gpu (gpu_images_h,      NUM_CAMS);
     gpu_clt =            copyalloc_pointers_gpu (gpu_clt_h,         NUM_CAMS);
-//    gpu_corr_images =    copyalloc_pointers_gpu (gpu_corr_images_h, NUM_CAMS);
+    gpu_corr_images =    copyalloc_pointers_gpu (gpu_corr_images_h, NUM_CAMS);
 
 
 #ifdef DBG_TILE
@@ -765,16 +762,18 @@ int main(int argc, char **argv)
     	}
 
     	convert_correct_tiles<<<grid_tp,threads_tp>>>(
-    			fgpu_kernel_offsets,    // struct CltExtra      ** gpu_kernel_offsets,
-				gpu_kernels,           // 		float           ** gpu_kernels,
-				gpu_images,            // 		float           ** gpu_images,
-				gpu_tasks,             // 		struct tp_task  * gpu_tasks,
-				gpu_clt,               //       float           ** gpu_clt,            // [NUM_CAMS][TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
-				dstride/sizeof(float), // 		size_t            dstride, // for gpu_images
-				tp_task_size,          // 		int               num_tiles) // number of tiles in task
-				0); // 7); // 0); // 7);                    //       int               lpf_mask)            // apply lpf to colors : bit 0 - red, bit 1 - blue, bit2 - green
-
-
+    			fgpu_kernel_offsets,   // struct CltExtra ** gpu_kernel_offsets,
+				gpu_kernels,           // float           ** gpu_kernels,
+				gpu_images,            // float           ** gpu_images,
+				gpu_tasks,             // struct tp_task   * gpu_tasks,
+				gpu_clt,               // float           ** gpu_clt,            // [NUM_CAMS][TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
+				dstride/sizeof(float), // size_t             dstride, // for gpu_images
+				tp_task_size,          // int                num_tiles) // number of tiles in task
+				0,                     // int                lpf_mask)            // apply lpf to colors : bit 0 - red, bit 1 - blue, bit2 - green
+				IMG_WIDTH,             // int                woi_width,
+				IMG_HEIGHT,            // int                woi_height,
+				KERNELS_HOR,           // int                kernels_hor,
+				KERNELS_VERT);         // int                kernels_vert);
     	getLastCudaError("Kernel execution failed");
     	checkCudaErrors(cudaDeviceSynchronize());
     	printf("%d\n",i);
@@ -823,7 +822,6 @@ int main(int argc, char **argv)
 #endif
 
 
-#ifndef NOICLT
     // testing imclt
     dim3 threads_imclt(IMCLT_THREADS_PER_TILE, IMCLT_TILES_PER_BLOCK, 1);
     printf("threads_imclt=(%d, %d, %d)\n",threads_imclt.x,threads_imclt.y,threads_imclt.z);
@@ -841,13 +839,8 @@ int main(int argc, char **argv)
 
     	for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
     		for (int color = 0; color < NUM_COLORS; color++) {
-#ifdef IMCLT14
-    			for (int v_offs = 0; v_offs < 1; v_offs++){     // temporarily for debugging
-    				for (int h_offs = 0; h_offs < 1; h_offs++){ // temporarily for debugging
-#else
-    	    			for (int v_offs = 0; v_offs < 2; v_offs++){
-    	    				for (int h_offs = 0; h_offs < 2; h_offs++){
-#endif
+    			for (int v_offs = 0; v_offs < 2; v_offs++){
+    				for (int h_offs = 0; h_offs < 2; h_offs++){
     					int tilesy_half = (TILESY + (v_offs ^ 1)) >> 1;
     					int tilesx_half = (TILESX + (h_offs ^ 1)) >> 1;
     					int tiles_in_pass = tilesy_half * tilesx_half;
@@ -857,10 +850,12 @@ int main(int argc, char **argv)
     							gpu_clt_h[ncam],         // float           * gpu_clt,            // [TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 								gpu_corr_images_h[ncam], // float           * gpu_rbg,            // WIDTH, 3 * HEIGHT
 								1,                       // int               apply_lpf,
-								0,                       // int               mono,               // defines lpf filter
+								NUM_COLORS,              // int               colors,               // defines lpf filter
 								color,                   // int               color,              // defines location of clt data
 								v_offs,                  // int               v_offset,
 								h_offs,                  // int               h_offset,
+								TILESX,                  // int               woi_twidth,
+								TILESY,                  // int               woi_theight,
 								dstride_rslt/sizeof(float));            //const size_t      dstride);            // in floats (pixels)
     				}
     			}
@@ -901,7 +896,6 @@ int main(int argc, char **argv)
     }
 
     free(cpu_corr_image);
-#endif
 
 
 #ifndef NOCORR
@@ -1269,16 +1263,14 @@ int main(int argc, char **argv)
     	checkCudaErrors(cudaFree(gpu_kernel_offsets_h[ncam]));
     	checkCudaErrors(cudaFree(gpu_images_h[ncam]));
     	checkCudaErrors(cudaFree(gpu_clt_h[ncam]));
-#ifndef NOICLT
     	checkCudaErrors(cudaFree(gpu_corr_images_h[ncam]));
-#endif
     }
 	checkCudaErrors(cudaFree(gpu_tasks));
 	checkCudaErrors(cudaFree(gpu_kernels));
 	checkCudaErrors(cudaFree(gpu_kernel_offsets));
 	checkCudaErrors(cudaFree(gpu_images));
 	checkCudaErrors(cudaFree(gpu_clt));
-//	checkCudaErrors(cudaFree(gpu_corr_images));
+	checkCudaErrors(cudaFree(gpu_corr_images));
 	checkCudaErrors(cudaFree(gpu_corrs));
 	checkCudaErrors(cudaFree(gpu_corr_indices));
 	checkCudaErrors(cudaFree(gpu_texture_indices));

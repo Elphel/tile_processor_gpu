@@ -51,7 +51,12 @@ __global__ void convert_correct_tiles(
 		float           ** gpu_clt,            // [NUM_CAMS][TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 		size_t             dstride,            // in floats (pixels)
 		int                num_tiles,          // number of tiles in task
-		int                lpf_mask);          // apply lpf to colors : bit 0 - red, bit 1 - blue, bit2 - green. Now - always 0 !
+		int                lpf_mask,           // apply lpf to colors : bit 0 - red, bit 1 - blue, bit2 - green. Now - always 0 !
+		int                woi_width,
+		int                woi_height,
+		int                kernels_hor,
+		int                kernels_vert);
+
 
 extern "C" __global__ void clear_texture_list(
 		int              * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
@@ -112,6 +117,8 @@ extern "C" __global__ void imclt_rbg(
 		int               color,              // defines location of clt data
 		int               v_offset,
 		int               h_offset,
+		int               woi_twidth,
+		int               woi_theight,
 		const size_t      dstride);            // in floats (pixels)
 
 extern "C"
