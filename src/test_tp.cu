@@ -278,6 +278,7 @@ int main(int argc, char **argv)
 			"/data_ssd/git/tile_processor_gpu/clt/main_chn2.portsxy",
 			"/data_ssd/git/tile_processor_gpu/clt/main_chn3.portsxy"};
 
+#ifndef DBG_TILE
     const char* ports_clt_file[] = { // never referenced
     		"/data_ssd/git/tile_processor_gpu/clt/main_chn0.clt",
 			"/data_ssd/git/tile_processor_gpu/clt/main_chn1.clt",
@@ -288,6 +289,7 @@ int main(int argc, char **argv)
 			"/data_ssd/git/tile_processor_gpu/clt/main_chn1.rbg",
 			"/data_ssd/git/tile_processor_gpu/clt/main_chn2.rbg",
 			"/data_ssd/git/tile_processor_gpu/clt/main_chn3.rbg"};
+#endif
     const char* result_corr_file = "/data_ssd/git/tile_processor_gpu/clt/main_corr.corr";
     const char* result_textures_file =       "/data_ssd/git/tile_processor_gpu/clt/texture.rgba";
     const char* result_textures_rgba_file = "/data_ssd/git/tile_processor_gpu/clt/texture_rgba.rgba";
@@ -297,7 +299,7 @@ int main(int argc, char **argv)
     const char* geometry_correction_file = "/data_ssd/git/tile_processor_gpu/clt/main.geometry_correction";
 
     // not yet used
-    float lpf_sigmas[3] = {0.9f, 0.9f, 0.9f}; // G, B, G
+///    float lpf_sigmas[3] = {0.9f, 0.9f, 0.9f}; // G, B, G
 
     float port_offsets[NUM_CAMS][2] =  {// used only in textures to scale differences
 			{-0.5, -0.5},
@@ -332,7 +334,7 @@ int main(int argc, char **argv)
     float            * gpu_images_h         [NUM_CAMS];
     float              tile_coords_h        [NUM_CAMS][TILESX * TILESY][2];
     float            * gpu_clt_h            [NUM_CAMS];
-    float            * gpu_lpf_h            [NUM_COLORS]; // never used
+///    float            * gpu_lpf_h            [NUM_COLORS]; // never used
     float            * gpu_corr_images_h    [NUM_CAMS];
 
     float            * gpu_corrs;
@@ -353,11 +355,16 @@ int main(int argc, char **argv)
     float           ** gpu_images; //            [NUM_CAMS];
     float           ** gpu_clt;    //            [NUM_CAMS];
     float           ** gpu_corr_images; //       [NUM_CAMS];
-    float           ** gpu_lpf;    //            [NUM_CAMS]; // never referenced
+///    float           ** gpu_lpf;    //            [NUM_CAMS]; // never referenced
 
     // GPU pointers to GPU memory
 //    float * gpu_tasks;
     struct tp_task  * gpu_tasks;
+    int *             gpu_active_tiles;
+    int *             gpu_num_active;
+    checkCudaErrors (cudaMalloc((void **)&gpu_active_tiles, TILESX * TILESY * sizeof(int)));
+    checkCudaErrors (cudaMalloc((void **)&gpu_num_active,                     sizeof(int)));
+
     size_t  dstride;          // in bytes !
     size_t  dstride_rslt;     // in bytes !
     size_t  dstride_corr;     // in bytes ! for one 2d phase correlation (padded 15x15x4 bytes)
@@ -399,7 +406,7 @@ int main(int argc, char **argv)
 			rByRDist_length);
 
     checkCudaErrors(cudaMalloc((void **)&gpu_rot_deriv, sizeof(trot_deriv)));
-
+/*
     float lpf_rbg[3][64]; // not used
     for (int ncol = 0; ncol < 3; ncol++) {
     	if (lpf_sigmas[ncol] > 0.0) {
@@ -412,7 +419,7 @@ int main(int argc, char **argv)
     		gpu_lpf_h[ncol] = NULL;
     	}
     }
-
+*/
     for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
         readFloatsFromFile(
         		host_kern_buf, // float * data, // allocated array
@@ -476,6 +483,9 @@ int main(int argc, char **argv)
     }
 
     int tp_task_size =  sizeof(task_data)/sizeof(struct tp_task);
+    int num_active_tiles; // will be calculated by convert_direct
+
+
 
 
 #ifdef DBG0
@@ -578,7 +588,6 @@ int main(int argc, char **argv)
     gpu_clt =            copyalloc_pointers_gpu (gpu_clt_h,         NUM_CAMS);
     gpu_corr_images =    copyalloc_pointers_gpu (gpu_corr_images_h, NUM_CAMS);
 
-
 #ifdef DBG_TILE
     const int numIterations = 1; //0;
     const int i0 =  0; // -1;
@@ -586,6 +595,8 @@ int main(int argc, char **argv)
     const int numIterations = 10; // 0; //0;
     const int i0 = -1; // 0; // -1;
 #endif
+
+
 
 #define TEST_ROT_MATRICES
 #ifdef  TEST_ROT_MATRICES
@@ -606,9 +617,6 @@ int main(int argc, char **argv)
     		sdkResetTimer(&timerROT_MATRICES);
     		sdkStartTimer(&timerROT_MATRICES);
     	}
-
-//    	calc_rot_matrices<<<grid_rot,threads_rot>>> (
-//    			gpu_correction_vector);   // 		struct corr_vector * gpu_correction_vector,
 
     	calc_rot_deriv<<<grid_rot,threads_rot>>> (
     			gpu_correction_vector ,           // 		struct corr_vector * gpu_correction_vector,
@@ -660,6 +668,67 @@ int main(int argc, char **argv)
 
 #endif // TEST_ROT_MATRICES
 
+#define TEST_REVERSE_DISTORTIONS
+#ifdef  TEST_REVERSE_DISTORTIONS
+    dim3 threads_rd(3,3,3);
+    dim3 grid_rd   (NUM_CAMS, 1, 1);
+
+    printf("REVERSE DISTORTIONS: threads_list=(%d, %d, %d)\n",threads_rd.x,threads_rd.y,threads_rd.z);
+    printf("REVERSE DISTORTIONS: grid_list=(%d, %d, %d)\n",grid_rd.x,grid_rd.y,grid_rd.z);
+    StopWatchInterface *timerREVERSE_DISTORTIONS = 0;
+    sdkCreateTimer(&timerREVERSE_DISTORTIONS);
+    for (int i = i0; i < numIterations; i++)
+    {
+    	if (i == 0)
+    	{
+    		checkCudaErrors(cudaDeviceSynchronize());
+    		sdkResetTimer(&timerREVERSE_DISTORTIONS);
+    		sdkStartTimer(&timerREVERSE_DISTORTIONS);
+    	}
+
+    	calcReverseDistortionTable<<<grid_rd,threads_rd>>>(
+    			gpu_geometry_correction, // 		struct gc          * gpu_geometry_correction,
+				gpu_rByRDist);
+
+
+    	getLastCudaError("Kernel failure");
+    	checkCudaErrors(cudaDeviceSynchronize());
+    	printf("test pass: %d\n",i);
+    }
+    ///	cudaProfilerStop();
+    sdkStopTimer(&timerREVERSE_DISTORTIONS);
+    float avgTimeREVERSE_DISTORTIONS = (float)sdkGetTimerValue(&timerREVERSE_DISTORTIONS) / (float)numIterations;
+    sdkDeleteTimer(&timerREVERSE_DISTORTIONS);
+    printf("Average calcReverseDistortionTable  run time =%f ms\n",  avgTimeREVERSE_DISTORTIONS);
+
+    float * rByRDist_gen = (float *) malloc(RBYRDIST_LEN * sizeof(float));
+	checkCudaErrors(cudaMemcpy(
+			rByRDist_gen,
+			gpu_rByRDist,
+			RBYRDIST_LEN * sizeof(float),
+			cudaMemcpyDeviceToHost));
+	float max_err = 0;
+	for (int i = 0; i < RBYRDIST_LEN; i++){
+		float err = abs(rByRDist_gen[i] - rByRDist[i]);
+		if (err > max_err){
+			max_err = err;
+		}
+#ifdef VERBOSE
+///		printf ("%5d: %8.6f %8.6f %f %f\n", i, rByRDist[i], rByRDist_gen[i] , err, max_err);
+#endif // #ifdef VERBOSE
+	}
+	printf("Maximal rByRDist error = %f\n",max_err);
+	free (rByRDist_gen);
+#if 0
+    // temporarily restore
+    checkCudaErrors(cudaMemcpy(
+    		gpu_rByRDist,
+			rByRDist,
+			RBYRDIST_LEN * sizeof(float),
+            cudaMemcpyHostToDevice));
+#endif // #if 1
+
+#endif // TEST_REVERSE_DISTORTIONS
 
 
 
@@ -680,14 +749,13 @@ int main(int argc, char **argv)
     		sdkResetTimer(&timerGEOM);
     		sdkStartTimer(&timerGEOM);
     	}
-
     	get_tiles_offsets<<<grid_geom,threads_geom>>> (
-    			gpu_tasks,                // struct tp_task   * gpu_tasks,
-				tp_task_size,             // int                num_tiles,          // number of tiles in task list
-				gpu_geometry_correction, // 		struct gc          * gpu_geometry_correction,
-				gpu_correction_vector,   // 		struct corr_vector * gpu_correction_vector,
-				gpu_rByRDist, // 		float *              gpu_rByRDist)      // length should match RBYRDIST_LEN
-				gpu_rot_deriv); // union trot_deriv   * gpu_rot_deriv);
+    			gpu_tasks,               // struct tp_task     * gpu_tasks,
+				tp_task_size,            // int                  num_tiles,          // number of tiles in task list
+				gpu_geometry_correction, //	struct gc          * gpu_geometry_correction,
+				gpu_correction_vector,   //	struct corr_vector * gpu_correction_vector,
+				gpu_rByRDist,            //	float *              gpu_rByRDist)      // length should match RBYRDIST_LEN
+				gpu_rot_deriv);          // union trot_deriv   * gpu_rot_deriv);
 
     	getLastCudaError("Kernel failure");
     	checkCudaErrors(cudaDeviceSynchronize());
@@ -708,9 +776,10 @@ int main(int argc, char **argv)
 			gpu_tasks,
 			tp_task_size * sizeof(struct tp_task),
 			cudaMemcpyDeviceToHost));
+#if 0 // for manual browsing
 	struct tp_task * old_task = &task_data [DBG_TILE];
 	struct tp_task * new_task = &task_data1[DBG_TILE];
-
+#endif
     printf("old_task txy = 0x%x\n",  task_data [DBG_TILE].txy);
     printf("new_task txy = 0x%x\n",  task_data1[DBG_TILE].txy);
 
@@ -740,15 +809,20 @@ int main(int argc, char **argv)
     StopWatchInterface *timerTP = 0;
     sdkCreateTimer(&timerTP);
 
-
+#if 0
     dim3 threads_tp(THREADSX, TILES_PER_BLOCK, 1);
     dim3 grid_tp((tp_task_size + TILES_PER_BLOCK -1 )/TILES_PER_BLOCK, 1);
+#else
+    dim3 threads_tp(1, 1, 1);
+    dim3 grid_tp(1, 1, 1);
+#endif
     printf("threads_tp=(%d, %d, %d)\n",threads_tp.x,threads_tp.y,threads_tp.z);
     printf("grid_tp=   (%d, %d, %d)\n",grid_tp.x,   grid_tp.y,   grid_tp.z);
 
 
 
-    cudaFuncSetCacheConfig(convert_correct_tiles, cudaFuncCachePreferShared);
+//    cudaFuncSetCacheConfig(convert_correct_tiles, cudaFuncCachePreferShared);
+//    cudaFuncSetCacheConfig(convert_correct_tiles, cudaFuncCachePreferShared);
     ///    cudaProfilerStart();
     float ** fgpu_kernel_offsets = (float **) gpu_kernel_offsets; //    [NUM_CAMS];
 
@@ -760,7 +834,22 @@ int main(int argc, char **argv)
     		sdkResetTimer(&timerTP);
     		sdkStartTimer(&timerTP);
     	}
-
+    	convert_direct<<<grid_tp,threads_tp>>>( // called with a single block, CONVERT_DIRECT_INDEXING_THREADS threads
+    			fgpu_kernel_offsets,   // struct CltExtra ** gpu_kernel_offsets,
+				gpu_kernels,           // float           ** gpu_kernels,
+				gpu_images,            // float           ** gpu_images,
+				gpu_tasks,             // struct tp_task   * gpu_tasks,
+				gpu_clt,               // float           ** gpu_clt,            // [NUM_CAMS][TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
+				dstride/sizeof(float), // size_t             dstride, // for gpu_images
+				tp_task_size,          // int                num_tiles) // number of tiles in task
+				0,                     // int                lpf_mask)            // apply lpf to colors : bit 0 - red, bit 1 - blue, bit2 - green
+				IMG_WIDTH,             // int                woi_width,
+				IMG_HEIGHT,            // int                woi_height,
+				KERNELS_HOR,           // int                kernels_hor,
+				KERNELS_VERT,          // int                kernels_vert);
+				gpu_active_tiles,      // int *              gpu_active_tiles,      // pointer to the calculated number of non-zero tiles
+    			gpu_num_active);       // int *              pnum_active_tiles);  //  indices to gpu_tasks
+#if 0
     	convert_correct_tiles<<<grid_tp,threads_tp>>>(
     			fgpu_kernel_offsets,   // struct CltExtra ** gpu_kernel_offsets,
 				gpu_kernels,           // float           ** gpu_kernels,
@@ -774,6 +863,9 @@ int main(int argc, char **argv)
 				IMG_HEIGHT,            // int                woi_height,
 				KERNELS_HOR,           // int                kernels_hor,
 				KERNELS_VERT);         // int                kernels_vert);
+
+#endif
+
     	getLastCudaError("Kernel execution failed");
     	checkCudaErrors(cudaDeviceSynchronize());
     	printf("%d\n",i);
@@ -782,7 +874,14 @@ int main(int argc, char **argv)
     sdkStopTimer(&timerTP);
     float avgTime = (float)sdkGetTimerValue(&timerTP) / (float)numIterations;
     sdkDeleteTimer(&timerTP);
-    printf("Run time =%f ms\n",  avgTime);
+
+	checkCudaErrors(cudaMemcpy(
+			&num_active_tiles,
+			gpu_num_active,
+			sizeof(int), // 8 sequences (0,2,4,6 - non-border, growing up;
+			//1,3,5,7 - border, growing down from the end of the corresponding non-border buffers
+			cudaMemcpyDeviceToHost));
+    printf("Run time =%f ms, num active tiles = %d\n",  avgTime, num_active_tiles);
 
 
 #ifdef SAVE_CLT
@@ -836,8 +935,6 @@ int main(int argc, char **argv)
     		sdkResetTimer(&timerIMCLT);
     		sdkStartTimer(&timerIMCLT);
     	}
-#define CDP1
-#ifdef CDP1
         dim3 threads_imclt_all(1, 1, 1);
 		dim3 grid_imclt_all(1, 1, 1);
         printf("threads_imclt_all=(%d, %d, %d)\n",threads_imclt_all.x,threads_imclt_all.y,threads_imclt_all.z);
@@ -850,34 +947,6 @@ int main(int argc, char **argv)
 				TILESX,                      // int               woi_twidth,
 				TILESY,                      // int               woi_theight,
 				dstride_rslt/sizeof(float)); // const size_t      dstride);            // in floats (pixels)
-#else
-        dim3 threads_imclt(IMCLT_THREADS_PER_TILE, IMCLT_TILES_PER_BLOCK, 1);
-        printf("threads_imclt=(%d, %d, %d)\n",threads_imclt.x,threads_imclt.y,threads_imclt.z);
-    	for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
-    		for (int color = 0; color < NUM_COLORS; color++) {
-    			for (int v_offs = 0; v_offs < 2; v_offs++){
-    				for (int h_offs = 0; h_offs < 2; h_offs++){
-    					int tilesy_half = (TILESY + (v_offs ^ 1)) >> 1;
-    					int tilesx_half = (TILESX + (h_offs ^ 1)) >> 1;
-    					int tiles_in_pass = tilesy_half * tilesx_half;
-    					dim3 grid_imclt((tiles_in_pass + IMCLT_TILES_PER_BLOCK-1) / IMCLT_TILES_PER_BLOCK,1,1);
-    					//    				printf("grid_imclt=   (%d, %d, %d)\n",grid_imclt.x,   grid_imclt.y,   grid_imclt.z);
-    					imclt_rbg<<<grid_imclt,threads_imclt>>>(
-    							gpu_clt_h[ncam],         // float           * gpu_clt,            // [TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
-								gpu_corr_images_h[ncam], // float           * gpu_rbg,            // WIDTH, 3 * HEIGHT
-								1,                       // int               apply_lpf,
-								NUM_COLORS,              // int               colors,               // defines lpf filter
-								color,                   // int               color,              // defines location of clt data
-								v_offs,                  // int               v_offset,
-								h_offs,                  // int               h_offset,
-								TILESX,                  // int               woi_twidth,
-								TILESY,                  // int               woi_theight,
-								dstride_rslt/sizeof(float));            //const size_t      dstride);            // in floats (pixels)
-    				}
-    			}
-    		}
-    	}
-#endif
     	getLastCudaError("Kernel failure");
     	checkCudaErrors(cudaDeviceSynchronize());
     	printf("test pass: %d\n",i);
@@ -1283,6 +1352,8 @@ int main(int argc, char **argv)
     	checkCudaErrors(cudaFree(gpu_corr_images_h[ncam]));
     }
 	checkCudaErrors(cudaFree(gpu_tasks));
+	checkCudaErrors(cudaFree(gpu_active_tiles));
+	checkCudaErrors(cudaFree(gpu_num_active));
 	checkCudaErrors(cudaFree(gpu_kernels));
 	checkCudaErrors(cudaFree(gpu_kernel_offsets));
 	checkCudaErrors(cudaFree(gpu_images));
