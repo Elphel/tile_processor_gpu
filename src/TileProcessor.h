@@ -42,7 +42,7 @@
 #endif
 
 
-extern "C" __global__ void convert_direct( // called with a single block, CONVERT_DIRECT_INDEXING_THREADS threads
+extern "C" __global__ void convert_direct( // called with a single block, single thread
 		//		struct CltExtra ** gpu_kernel_offsets, // [NUM_CAMS], // changed for jcuda to avoid struct parameters
 		float           ** gpu_kernel_offsets, // [NUM_CAMS],
 		float           ** gpu_kernels,        // [NUM_CAMS],
@@ -58,6 +58,22 @@ extern "C" __global__ void convert_direct( // called with a single block, CONVER
 		int                kernels_vert,
 		int *              gpu_active_tiles,      // pointer to the calculated number of non-zero tiles
 		int *              pnum_active_tiles);  //  indices to gpu_tasks
+
+extern "C" __global__ void correlate2D(
+		float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
+		int               colors,             // number of colors (3/1)
+		float             scale0,             // scale for R
+		float             scale1,             // scale for B
+		float             scale2,             // scale for G
+		float             fat_zero,           // here - absolute
+		struct tp_task  * gpu_tasks,          // array of per-tile tasks (now bits 4..9 - correlation pairs)
+		int               num_tiles,          // number of tiles in task
+		int             * gpu_corr_indices,   // packed tile+pair
+		int             * pnum_corr_tiles,    // pointer to a number of correlation tiles to process
+		const size_t      corr_stride,        // in floats
+		int               corr_radius,        // radius of the output correlation (7 for 15x15)
+		float           * gpu_corrs);          // correlation output data
+
 
 extern "C" __global__ void textures_accumulate(
 		int             * woi,                // x, y, width,height
