@@ -993,7 +993,6 @@ int main(int argc, char **argv)
     		sdkResetTimer(&timerCORR);
     		sdkStartTimer(&timerCORR);
     	}
-#if 1
         correlate2D<<<1,1>>>(
 		gpu_clt,                    // float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 		3,                          // int               colors,             // number of colors (3/1)
@@ -1008,21 +1007,6 @@ int main(int argc, char **argv)
 		dstride_corr/sizeof(float), // const size_t      corr_stride,        // in floats
 		CORR_OUT_RAD,               // int               corr_radius,        // radius of the output correlation (7 for 15x15)
 		gpu_corrs);                 // float           * gpu_corrs);          // correlation output data
-#else
-        dim3 grid_corr((num_corrs + CORR_TILES_PER_BLOCK-1) / CORR_TILES_PER_BLOCK,1,1);
-        correlate2D_inner<<<grid_corr,threads_corr>>>(
-		gpu_clt,   // float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
-		3,         // int               colors,             // number of colors (3/1)
-		0.25,      // float             scale0,             // scale for R
-		0.25,      // float             scale1,             // scale for B
-		0.5,       // float             scale2,             // scale for G
-		30.0,      // float             fat_zero,           // here - absolute
-		num_corrs, // size_t            num_corr_tiles,     // number of correlation tiles to process
-		gpu_corr_indices, //  int             * gpu_corr_indices,   // packed tile+pair
-		dstride_corr/sizeof(float), // const size_t      corr_stride,        // in floats
-		CORR_OUT_RAD, // int               corr_radius,        // radius of the output correlation (7 for 15x15)
-		gpu_corrs); // float           * gpu_corrs);          // correlation output data
-#endif
 
     	getLastCudaError("Kernel failure");
     	checkCudaErrors(cudaDeviceSynchronize());
@@ -1090,12 +1074,12 @@ int main(int argc, char **argv)
 		// Channel1 weight = 0.117647
 		// Channel2 weight = 0.588235
     	textures_accumulate<<<grid_texture,threads_texture>>> (
-//    			0,          // int               border_tile,        // if 1 - watch for border
-    			(int *) 0,  //      int             * woi,                // x, y, width,height
+    			(int *) 0,             // int             * woi,                // x, y, width,height
 		        gpu_clt ,              // float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 				num_textures,          // size_t            num_texture_tiles,  // number of texture tiles to process
+				// requires initialized gpu_texture_indices
 				gpu_texture_indices,   // int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
-				gpu_port_offsets,      // float           * port_offsets,       // relative ports x,y offsets - just to scale differences, may be approximate
+				gpu_geometry_correction, // struct gc     * gpu_geometry_correction,
 				texture_colors,        // int               colors,             // number of colors (3/1)
 				(texture_colors == 1), // int               is_lwir,            // do not perform shot correction
 				10.0,                  // float             min_shot,           // 10.0
@@ -1103,9 +1087,7 @@ int main(int argc, char **argv)
 				1.5f,                  // float             diff_sigma,         // pixel value/pixel change
 				10.0f,                 // float             diff_threshold,     // pixel value/pixel change
 				3.0,                   // float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
-				0.294118,              // float             weight0,            // scale for R
-				0.117647,              // float             weight1,            // scale for B
-				0.588235,              // float             weight2,            // scale for G
+				gpu_color_weights,     // float             weights[3],         // scale for R
 				1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
 				keep_texture_weights,  // int               keep_weights,       // return channel weights after A in RGBA
     	// combining both non-overlap and overlap (each calculated if pointer is not null )
@@ -1166,7 +1148,7 @@ int main(int argc, char **argv)
 #endif // ifndef NOTEXTURES
 
 
-#define GEN_TEXTURE_LIST
+#undef GEN_TEXTURE_LIST
 #ifdef  GEN_TEXTURE_LIST
     		dim3 threads_list(1,1, 1); // TEXTURE_TILES_PER_BLOCK, 1);
     		dim3 grid_list   (1,1,1);
@@ -1269,7 +1251,7 @@ int main(int argc, char **argv)
     	// Parameters to generate texture tasks
                 gpu_tasks,             // struct tp_task   * gpu_tasks,
                 tp_task_size,          // int                num_tiles,          // number of tiles in task list
-    	// declare arrays in device code?
+		// Does not require initialized gpu_texture_indices to be initialized - just allocated, will generate.
 	            gpu_texture_indices,   // int              * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
 	            gpu_num_texture_tiles, // int              * num_texture_tiles,  // number of texture tiles to process (8 elements)
 	            gpu_woi,               // int              * woi,                // x,y,width,height of the woi
@@ -1277,9 +1259,7 @@ int main(int argc, char **argv)
 	            TILESY,                // int                height); // <= TILESY, use for faster processing of LWIR images
     	// Parameters for the texture generation
 	            gpu_clt ,              // float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
-//				(float *)
-				gpu_geometry_correction, // struct gc          * gpu_geometry_correction,
-//	            gpu_port_offsets,      // float           * port_offsets,       // relative ports x,y offsets - just to scale differences, may be approximate
+				gpu_geometry_correction, // struct gc     * gpu_geometry_correction,
 	            texture_colors,        // int               colors,             // number of colors (3/1)
 	            (texture_colors == 1), // int               is_lwir,            // do not perform shot correction
 	            10.0,                  // float             min_shot,           // 10.0
@@ -1288,9 +1268,6 @@ int main(int argc, char **argv)
 	            10.0f,                 // float             diff_threshold,     // pixel value/pixel change
 	            3.0,                   // float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
 				gpu_color_weights,     // float             weights[3],         // scale for R
-//	            0.294118,              // float             weight0,            // scale for R
-//	            0.117647,              // float             weight1,            // scale for B
-//	            0.588235,              // float             weight2,            // scale for G
 	            1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
 	            0,                     // int               keep_weights,       // return channel weights after A in RGBA
 				dstride_textures_rbga/sizeof(float), // 	const size_t      texture_rbga_stride,     // in floats
