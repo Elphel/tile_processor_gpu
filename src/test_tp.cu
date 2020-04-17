@@ -341,6 +341,7 @@ int main(int argc, char **argv)
     int              * gpu_corr_indices;
 
     float            * gpu_textures;
+    float            * gpu_diff_rgb_combo;
     float            * gpu_textures_rbga;
     int              * gpu_texture_indices;
     int              * gpu_woi;
@@ -587,7 +588,8 @@ int main(int argc, char **argv)
     		&dstride_textures_rbga,              // in bytes ! for one rgba/ya 16x16 tile
 			rgba_width,              // int width (floats),
 			rgba_height * rbga_slices);               // int height);
-
+//    checkCudaErrors(cudaMalloc((void **)&gpu_diff_rgb_combo,  TILESX * TILESY * NUM_CAMS * (NUM_COLS+1)* sizeof(float)));
+    checkCudaErrors(cudaMalloc((void **)&gpu_diff_rgb_combo,  TILESX * TILESY * NUM_CAMS * (NUM_COLORS + 1) * sizeof(float)));
 
     // Now copy arrays of per-camera pointers to GPU memory to GPU itself
 
@@ -1094,7 +1096,9 @@ int main(int argc, char **argv)
     			0, // const size_t      texture_rbg_stride, // in floats
     			(float *) 0, // float           * gpu_texture_rbg,     // (number of colors +1 + ?)*16*16 rgba texture tiles
 				dstride_textures/sizeof(float), // const size_t      texture_stride,     // in floats (now 256*4 = 1024)
-				gpu_textures);    // float           * gpu_texture_tiles);  // 4*16*16 rgba texture tiles
+				gpu_textures,    // float           * gpu_texture_tiles);  // 4*16*16 rgba texture tiles
+				gpu_diff_rgb_combo);             // float           * gpu_diff_rgb_combo) // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
+
     	getLastCudaError("Kernel failure");
     	checkCudaErrors(cudaDeviceSynchronize());
     	printf("test pass: %d\n",i);
@@ -1271,7 +1275,8 @@ int main(int argc, char **argv)
 	            1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
 	            0,                     // int               keep_weights,       // return channel weights after A in RGBA
 				dstride_textures_rbga/sizeof(float), // 	const size_t      texture_rbga_stride,     // in floats
-				gpu_textures_rbga);    // 	float           * gpu_texture_tiles)    // (number of colors +1 + ?)*16*16 rgba texture tiles
+				gpu_textures_rbga,     // 	float           * gpu_texture_tiles)    // (number of colors +1 + ?)*16*16 rgba texture tiles
+				gpu_diff_rgb_combo);   // float           * gpu_diff_rgb_combo) // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
 
     	getLastCudaError("Kernel failure");
     	checkCudaErrors(cudaDeviceSynchronize());
@@ -1362,9 +1367,9 @@ int main(int argc, char **argv)
 	checkCudaErrors(cudaFree(gpu_color_weights));
 	checkCudaErrors(cudaFree(gpu_textures));
 	checkCudaErrors(cudaFree(gpu_textures_rbga));
+	checkCudaErrors(cudaFree(gpu_diff_rgb_combo));
 	checkCudaErrors(cudaFree(gpu_woi));
 	checkCudaErrors(cudaFree(gpu_num_texture_tiles));
-
 	checkCudaErrors(cudaFree(gpu_geometry_correction));
     checkCudaErrors(cudaFree(gpu_correction_vector));
     checkCudaErrors(cudaFree(gpu_rByRDist));
