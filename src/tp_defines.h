@@ -114,8 +114,12 @@
 // geom
 //#define DEBUG20 1
 
-#define DEBUG21 1
+// #define DEBUG21 1 // Geometry Correction
+#if (DBG_TILE_X >= 0) && (DBG_TILE_Y >= 0)
 
+#define DEBUG22 1
+
+#endif //#if (DBG_TILE_X >= 0) && (DBG_TILE_Y >= 0)
 
 #endif //#ifndef JCUDA
 
