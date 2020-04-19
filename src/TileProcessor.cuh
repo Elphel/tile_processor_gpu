@@ -1902,8 +1902,7 @@ extern "C" __global__ void textures_nonoverlap(
 
 
 //#undef USE_textures_gen
-extern "C"
-__global__ void textures_accumulate( // (8,4,1) (N,1,1)
+extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 		int             * woi,                // x, y, width,height
 		float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 		size_t            num_texture_tiles,  // number of texture tiles to process
@@ -3952,7 +3951,6 @@ __device__ void tile_combine_rgba(
 			}
 			max_diff_shared[cam] = sqrtf(mx);
 		}
-		__syncthreads(); //?
 #ifdef DEBUG22
 		if (debug  && (threadIdx.x == 0) && (threadIdx.y == 0)){
 			printf("\n 1. max_diff\n");
@@ -4022,7 +4020,6 @@ __device__ void tile_combine_rgba(
 				ports_rgb_shared[ncol][cam] /= DTT_SIZE2*DTT_SIZE2; // correct for window?
 			}
 		}
-		__syncthreads(); //?
 #ifdef DEBUG22
 		if (debug  && (threadIdx.x == 0) && (threadIdx.y == 0)){
 			printf("\n 2. max_diff\n");

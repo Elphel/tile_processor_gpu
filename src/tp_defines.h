@@ -118,7 +118,7 @@
 //#define DEBUG21 1 // Geometry Correction
 
 //#define DEBUG22 1
-#define DEBUG23 1
+//#define DEBUG23 1
 
 #endif //#if (DBG_TILE_X >= 0) && (DBG_TILE_Y >= 0)
 

@@ -1276,8 +1276,8 @@ int main(int argc, char **argv)
 	            1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
 	            0,                     // int               keep_weights,       // return channel weights after A in RGBA
 				dstride_textures_rbga/sizeof(float), // 	const size_t      texture_rbga_stride,     // in floats
-				gpu_textures_rbga,     // 	float           * gpu_texture_tiles)    // (number of colors +1 + ?)*16*16 rgba texture tiles
-				(float *) 0 ); // gpu_diff_rgb_combo);   // float           * gpu_diff_rgb_combo) // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
+				gpu_textures_rbga);     // 	float           * gpu_texture_tiles)    // (number of colors +1 + ?)*16*16 rgba texture tiles
+//				(float *) 0 ); // gpu_diff_rgb_combo);   // float           * gpu_diff_rgb_combo) // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
 
     	getLastCudaError("Kernel failure");
     	checkCudaErrors(cudaDeviceSynchronize());
