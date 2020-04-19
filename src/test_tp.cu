@@ -648,6 +648,7 @@ int main(int argc, char **argv)
 			gpu_rot_deriv,
 			sizeof(trot_deriv),
 			cudaMemcpyDeviceToHost));
+#if 0
 	const char* matrices_names[] = {
 	    		"rot","d_daz","d_tilt","d_roll","d_zoom"};
     for (int i = 0; i < 5;i++){
@@ -675,6 +676,7 @@ int main(int argc, char **argv)
 			}
 		}
     }
+#endif //#if 0
 
 
 #endif // TEST_ROT_MATRICES
