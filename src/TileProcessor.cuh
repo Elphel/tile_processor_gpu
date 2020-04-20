@@ -1217,8 +1217,7 @@ extern "C" __global__ void correlate2D_inner(
 }
 #define USE_CDP
 #ifdef USE_CDP
-extern "C"
-__global__ void generate_RBGA(
+extern "C" __global__ void generate_RBGA(
 // Parameters to generate texture tasks
 			struct tp_task   * gpu_tasks,
 			int                num_tiles,          // number of tiles in task list
@@ -1232,26 +1231,40 @@ __global__ void generate_RBGA(
 			float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 			// TODO: use geometry_correction rXY !
 			struct gc       * gpu_geometry_correction,
-//			float           * gpu_geometry_correction,
-//			float           * gpu_port_offsets,       // relative ports x,y offsets - just to scale differences, may be approximate
 			int               colors,             // number of colors (3/1)
 			int               is_lwir,            // do not perform shot correction
+			float             params[5],
+			/*
 			float             min_shot,           // 10.0
 			float             scale_shot,         // 3.0
 			float             diff_sigma,         // pixel value/pixel change
 			float             diff_threshold,     // pixel value/pixel change
 			float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
+			*/
 			float             weights[3],         // scale for R,B,G
 			int               dust_remove,        // Do not reduce average weight when only one image differs much from the average
 			int               keep_weights,       // return channel weights after A in RGBA (was removed)
-			const size_t      texture_rbga_stride,     // in floats
+ 			const size_t      texture_rbga_stride,     // in floats
+			float           * gpu_texture_tiles)  // (number of colors +1 + ?)*16*16 rgba texture tiles
+//			float             aaaa)
+//			float           * gpu_diff_rgb_combo) // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
+/*
+ 			const size_t      texture_rbga_stride,     // in floats
 			float           * gpu_texture_tiles,  // (number of colors +1 + ?)*16*16 rgba texture tiles
-			float           * gpu_diff_rgb_combo) // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
+			float             aaaa)
+
+ */
 {
+	float             min_shot = params[0];           // 10.0
+	float             scale_shot = params[1];         // 3.0
+	float             diff_sigma = params[2];         // pixel value/pixel change
+	float             diff_threshold = params[3];     // pixel value/pixel change
+	float             min_agree = params[4];          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
+
+
 // TODO use atomic_add to increment	num_texture_tiles
 // TODO calculate woi
-
-	dim3 threads0((1 << THREADS_DYNAMIC_BITS), 1, 1);
+dim3 threads0((1 << THREADS_DYNAMIC_BITS), 1, 1);
     int blocks_x = (width + ((1 << THREADS_DYNAMIC_BITS) - 1)) >> THREADS_DYNAMIC_BITS;
     dim3 blocks0 (blocks_x, height, 1);
 
@@ -1380,8 +1393,7 @@ __global__ void generate_RBGA(
 						gpu_texture_tiles,               // float           * gpu_texture_rbg,     // (number of colors +1 + ?)*16*16 rgba texture tiles
 			    		0,                               // size_t      texture_stride,     // in floats (now 256*4 = 1024)
 						gpu_texture_tiles, //(float *)0);// float           * gpu_texture_tiles);  // (number of colors +1 + ?)*16*16 rgba texture tiles
-						gpu_diff_rgb_combo);             // float           * gpu_diff_rgb_combo) // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
-//						gpu_diff_rgb_combo + ti_offset * NUM_CAMS*(colors+1)); // float           * gpu_diff_rgb_combo) // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
+						(float *)0);//gpu_diff_rgb_combo);             // float           * gpu_diff_rgb_combo) // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
 
 				cudaDeviceSynchronize(); // not needed yet, just for testing
 				/* */
@@ -1848,11 +1860,12 @@ extern "C" __global__ void textures_nonoverlap(
 		struct gc       * gpu_geometry_correction,
 		int               colors,             // number of colors (3/1)
 		int               is_lwir,            // do not perform shot correction
-		float             min_shot,           // 10.0
-		float             scale_shot,         // 3.0
-		float             diff_sigma,         // pixel value/pixel change
-		float             diff_threshold,     // pixel value/pixel change
-		float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
+		float             params[5],
+//		float             min_shot,           // 10.0
+//		float             scale_shot,         // 3.0
+//		float             diff_sigma,         // pixel value/pixel change
+//		float             diff_threshold,     // pixel value/pixel change
+//		float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
 		float             weights[3],         // scale for R,B,G
 		int               dust_remove,        // Do not reduce average weight when only one image differs much from the average
 //		int               keep_weights,       // return channel weights after A in RGBA (was removed) (should be 0 if gpu_texture_rbg)?
@@ -1861,6 +1874,12 @@ extern "C" __global__ void textures_nonoverlap(
 		float           * gpu_texture_tiles,  // (number of colors +1 + ?)*16*16 rgba texture tiles
 		float           * gpu_diff_rgb_combo) // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
 {
+	float             min_shot = params[0];           // 10.0
+	float             scale_shot = params[1];         // 3.0
+	float             diff_sigma = params[2];         // pixel value/pixel change
+	float             diff_threshold = params[3];     // pixel value/pixel change
+	float             min_agree = params[4];          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
+
 	 dim3 threads0(CONVERT_DIRECT_INDEXING_THREADS, 1, 1);
 	 dim3 blocks0 ((num_tiles + CONVERT_DIRECT_INDEXING_THREADS -1) >> CONVERT_DIRECT_INDEXING_THREADS_LOG2,1, 1);
 

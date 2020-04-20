@@ -348,6 +348,7 @@ int main(int argc, char **argv)
     int              * gpu_num_texture_tiles;
     float            * gpu_port_offsets;
     float            * gpu_color_weights;
+    float            * gpu_generate_RBGA_params;
     int                num_corrs;
     int                num_textures;
     int                num_ports = NUM_CAMS;
@@ -562,9 +563,17 @@ int main(int argc, char **argv)
             0.294118,              // float             weight0,            // scale for R
             0.117647,              // float             weight1,            // scale for B
             0.588235};              // float             weight2,            // scale for G
+	float generate_RBGA_params[]={
+			10.0,                  // float             min_shot,           // 10.0
+            3.0,                   // float             scale_shot,         // 3.0
+            1.5f,                  // float             diff_sigma,         // pixel value/pixel change
+            10.0f,                 // float             diff_threshold,     // pixel value/pixel change
+            3.0                    // float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
+	};
 
-    gpu_port_offsets = (float *) copyalloc_kernel_gpu((float * ) port_offsets, num_ports * 2);
-    gpu_color_weights = (float *) copyalloc_kernel_gpu((float * ) color_weights, sizeof(color_weights));
+	gpu_port_offsets =         (float *) copyalloc_kernel_gpu((float * ) port_offsets, num_ports * 2);
+    gpu_color_weights =        (float *) copyalloc_kernel_gpu((float * ) color_weights, sizeof(color_weights));
+    gpu_generate_RBGA_params = (float *) copyalloc_kernel_gpu((float * ) generate_RBGA_params, sizeof(generate_RBGA_params));
 
 
 
@@ -1088,11 +1097,14 @@ int main(int argc, char **argv)
 				gpu_geometry_correction, // struct gc     * gpu_geometry_correction,
 				texture_colors,        // int               colors,             // number of colors (3/1)
 				(texture_colors == 1), // int               is_lwir,            // do not perform shot correction
-				10.0,                  // float             min_shot,           // 10.0
-				3.0,                   // float             scale_shot,         // 3.0
-				1.5f,                  // float             diff_sigma,         // pixel value/pixel change
-				10.0f,                 // float             diff_threshold,     // pixel value/pixel change
-				3.0,                   // float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
+				gpu_generate_RBGA_params,
+/*
+	            10.0,                  // float             min_shot,           // 10.0
+	            3.0,                   // float             scale_shot,         // 3.0
+	            1.5f,                  // float             diff_sigma,         // pixel value/pixel change
+	            10.0f,                 // float             diff_threshold,     // pixel value/pixel change
+	            3.0,                   // float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
+*/
 				gpu_color_weights,     // float             weights[3],         // scale for R
 				1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
     	// combining both non-overlap and overlap (each calculated if pointer is not null )
@@ -1267,11 +1279,14 @@ int main(int argc, char **argv)
 				gpu_geometry_correction, // struct gc     * gpu_geometry_correction,
 	            texture_colors,        // int               colors,             // number of colors (3/1)
 	            (texture_colors == 1), // int               is_lwir,            // do not perform shot correction
+				gpu_generate_RBGA_params,
+/*
 	            10.0,                  // float             min_shot,           // 10.0
 	            3.0,                   // float             scale_shot,         // 3.0
 	            1.5f,                  // float             diff_sigma,         // pixel value/pixel change
 	            10.0f,                 // float             diff_threshold,     // pixel value/pixel change
 	            3.0,                   // float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
+*/
 				gpu_color_weights,     // float             weights[3],         // scale for R
 	            1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
 	            0,                     // int               keep_weights,       // return channel weights after A in RGBA
@@ -1366,6 +1381,7 @@ int main(int argc, char **argv)
 	checkCudaErrors(cudaFree(gpu_texture_indices));
 	checkCudaErrors(cudaFree(gpu_port_offsets));
 	checkCudaErrors(cudaFree(gpu_color_weights));
+	checkCudaErrors(cudaFree(gpu_generate_RBGA_params));
 	checkCudaErrors(cudaFree(gpu_textures));
 	checkCudaErrors(cudaFree(gpu_textures_rbga));
 	checkCudaErrors(cudaFree(gpu_diff_rgb_combo));
