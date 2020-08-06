@@ -1287,7 +1287,7 @@ extern "C" __global__ void generate_RBGA(
 	float             diff_sigma = params[2];         // pixel value/pixel change
 	float             diff_threshold = params[3];     // pixel value/pixel change
 	float             min_agree = params[4];          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
-
+	int               tilesya =  ((height +3) & (~3)); //#define TILESYA       ((TILESY +3) & (~3))
 	dim3 threads0((1 << THREADS_DYNAMIC_BITS), 1, 1);
     int blocks_x = (width + ((1 << THREADS_DYNAMIC_BITS) - 1)) >> THREADS_DYNAMIC_BITS;
     dim3 blocks0 (blocks_x, height, 1);
@@ -1308,8 +1308,8 @@ extern "C" __global__ void generate_RBGA(
 				gpu_texture_indices); // packed tile + bits (now only (1 << 7)
 		cudaDeviceSynchronize();
 	    // mark n/e/s/w used tiles from gpu_texture_indices memory to gpu_tasks lower 4 bits
-		*(woi + 0) = TILESX;
-		*(woi + 1) = TILESY;
+		*(woi + 0) = width;  // TILESX;
+		*(woi + 1) = height; // TILESY;
 		*(woi + 2) = 0; // maximal x
 		*(woi + 3) = 0; // maximal y
 		mark_texture_neighbor_tiles <<<blocks,threads>>>(
@@ -1365,9 +1365,9 @@ extern "C" __global__ void generate_RBGA(
 			    int border_tile =  pass >> 2;
 			    int ntt = *(num_texture_tiles + ((pass & 3) << 1) + border_tile);
 			    dim3 grid_texture((ntt + TEXTURE_TILES_PER_BLOCK-1) / TEXTURE_TILES_PER_BLOCK,1,1); // TEXTURE_TILES_PER_BLOCK = 1
-			    int ti_offset = (pass & 3) * (TILESX * (TILESYA >> 2));  // 1/4
+			    int ti_offset = (pass & 3) * (width * (tilesya >> 2)); //  (TILESX * (TILESYA >> 2));  // 1/4
 			    if (border_tile){
-			    	ti_offset += TILESX * (TILESYA >> 2) - ntt;
+			    	ti_offset += width * (tilesya >> 2) - ntt;; // TILESX * (TILESYA >> 2) - ntt;
 			    }
 #ifdef DEBUG12
 				printf("\ngenerate_RBGA() pass= %d, border_tile= %d, ti_offset= %d, ntt=%d\n",
@@ -1485,8 +1485,8 @@ __global__ void prepare_texture_list(
 				gpu_texture_indices); // packed tile + bits (now only (1 << 7)
 		cudaDeviceSynchronize();
 	    // mark n/e/s/w used tiles from gpu_texture_indices memory to gpu_tasks lower 4 bits
-		*(woi + 0) = TILESX;
-		*(woi + 1) = TILESY;
+		*(woi + 0) = width; // TILESX;
+		*(woi + 1) = height; // TILESY;
 		*(woi + 2) = 0; // maximal x
 		*(woi + 3) = 0; // maximal y
 		mark_texture_neighbor_tiles <<<blocks,threads>>>(
@@ -1538,7 +1538,7 @@ __global__ void clear_texture_list(
 	if (col > width) {
 		return;
 	}
-	*(gpu_texture_indices + col + row * TILESX) = 0;
+	*(gpu_texture_indices + col + row * width) = 0; // TILESX) = 0;
 }
 /**
  * Helper kernel for prepare_texture_list() (for generate_RBGA) - mark used tiles in
@@ -3173,12 +3173,16 @@ __device__ void convertCorrectTile(
 	int_topleft[1] = itly;
 
 #ifdef DEBUG_OOB11
+#ifdef IMG_WIDTH
+#ifdef IMG_HEIGHT
 	if ((int_topleft[0] < 0) || (int_topleft[1] < 0) || (int_topleft[0] >= (IMG_WIDTH - DTT_SIZE)) || (int_topleft[1] >= IMG_HEIGHT - DTT_SIZE)){
 		printf("Source data OOB, left=%d, top=%d\n",int_topleft[0],int_topleft[1]);
 		printf("\n");
 		printf("\n");
 	    __syncthreads();// __syncwarp();
 	}
+#endif // IMG_HEIGHT
+#endif // IMG_WIDTH
 #endif // DEBUG_OOB1
 
 
