@@ -838,12 +838,15 @@ __global__ void mark_texture_tiles(
 __global__ void mark_texture_neighbor_tiles(
 		struct tp_task   * gpu_tasks,
 		int                num_tiles,           // number of tiles in task list
+		int                width,               // number of tiles in a row
 		int              * gpu_texture_indices, // packed tile + bits (now only (1 << 7)
 		int              * woi);                // x,y,width,height of the woi
 
 __global__ void gen_texture_list(
 		struct tp_task   * gpu_tasks,
 		int                num_tiles,           // number of tiles in task list
+		int                width,               // number of tiles in a row
+		int                height,               // number of tiles rows
 		int              * gpu_texture_indices, // packed tile + bits (now only (1 << 7)
 		int              * num_texture_tiles,  // number of texture tiles to process
 		int              * woi);                // x,y,width,height of the woi
@@ -1317,8 +1320,9 @@ extern "C" __global__ void generate_RBGA(
 		mark_texture_neighbor_tiles <<<blocks,threads>>>(
 				gpu_tasks,
 				num_tiles,           // number of tiles in task list
+				width,               // number of tiles in a row
 				gpu_texture_indices, // packed tile + bits (now only (1 << 7)
-				woi);               // min_x, min_y, max_x, max_y
+				woi);                // min_x, min_y, max_x, max_y
 
 		cudaDeviceSynchronize();
 	    // Generate tile indices list, upper 24 bits - tile index, lower 4 bits: n/e/s/w neighbors, bit 7 - set to 1
@@ -1333,10 +1337,12 @@ extern "C" __global__ void generate_RBGA(
 
 		gen_texture_list <<<blocks,threads>>>(
 				gpu_tasks,
-				num_tiles,          // number of tiles in task list
-				gpu_texture_indices,// packed tile + bits (now only (1 << 7)
-				num_texture_tiles,  // number of texture tiles to process
-				woi);               // x,y, here woi[2] = max_X, woi[3] - max-Y
+				num_tiles,           // number of tiles in task list
+				width,               // number of tiles in a row
+				height,              // int                height,               // number of tiles rows
+				gpu_texture_indices, // packed tile + bits (now only (1 << 7)
+				num_texture_tiles,   // number of texture tiles to process
+				woi);                // x,y, here woi[2] = max_X, woi[3] - max-Y
 
 		cudaDeviceSynchronize(); // not needed yet, just for testing
 		*(woi + 2) += 1 - *(woi + 0); // width
@@ -1495,6 +1501,7 @@ __global__ void prepare_texture_list(
 		mark_texture_neighbor_tiles <<<blocks,threads>>>(
 				gpu_tasks,
 				num_tiles,           // number of tiles in task list
+				width,               // number of tiles in a row
 				gpu_texture_indices, // packed tile + bits (now only (1 << 7)
 				woi);               // min_x, min_y, max_x, max_y
 		cudaDeviceSynchronize();
@@ -1510,10 +1517,12 @@ __global__ void prepare_texture_list(
 
 		gen_texture_list <<<blocks,threads>>>(
 				gpu_tasks,
-				num_tiles,          // number of tiles in task list
-				gpu_texture_indices,// packed tile + bits (now only (1 << 7)
-				num_texture_tiles,  // number of texture tiles to process
-				woi);               // x,y, here woi[2] = max_X, woi[3] - max-Y
+				num_tiles,           // number of tiles in task list
+				width,               // number of tiles in a row
+				height,              // int                height,               // number of tiles rows
+				gpu_texture_indices, // packed tile + bits (now only (1 << 7)
+				num_texture_tiles,   // number of texture tiles to process
+				woi);                // x,y, here woi[2] = max_X, woi[3] - max-Y
 
 		cudaDeviceSynchronize(); // not needed yet, just for testing
 		*(woi + 2) += 1 - *(woi + 0); // width
@@ -1586,6 +1595,7 @@ __global__ void mark_texture_tiles(
 __global__ void mark_texture_neighbor_tiles( // TODO: remove __global__?
 		struct tp_task   * gpu_tasks,
 		int                num_tiles,           // number of tiles in task list
+		int                width,               // number of tiles in a row
 		int              * gpu_texture_indices, // packed tile + bits (now only (1 << 7)
 		int              * woi)                  // x,y,width,height of the woi
 
@@ -1606,10 +1616,15 @@ __global__ void mark_texture_neighbor_tiles( // TODO: remove __global__?
 	atomicMax(woi+2, x);
 	atomicMax(woi+3, y);
 	int d = 0;
-	if ((y > 0)            && *(gpu_texture_indices +  x +     (y - 1) * TILESX)) d |= (1 << TASK_TEXTURE_N_BIT);
-	if ((x < (TILESX - 1)) && *(gpu_texture_indices + (x + 1) + y *      TILESX)) d |= (1 << TASK_TEXTURE_E_BIT);
-	if ((y < (TILESY - 1)) && *(gpu_texture_indices +  x +     (y + 1) * TILESX)) d |= (1 << TASK_TEXTURE_S_BIT);
-	if ((x > 0)            && *(gpu_texture_indices + (x - 1) + y *      TILESX)) d |= (1 << TASK_TEXTURE_W_BIT);
+//	if ((y > 0)            && *(gpu_texture_indices +  x +     (y - 1) * TILESX)) d |= (1 << TASK_TEXTURE_N_BIT);
+//	if ((x < (TILESX - 1)) && *(gpu_texture_indices + (x + 1) + y *      TILESX)) d |= (1 << TASK_TEXTURE_E_BIT);
+//	if ((y < (TILESY - 1)) && *(gpu_texture_indices +  x +     (y + 1) * TILESX)) d |= (1 << TASK_TEXTURE_S_BIT);
+//	if ((x > 0)            && *(gpu_texture_indices + (x - 1) + y *      TILESX)) d |= (1 << TASK_TEXTURE_W_BIT);
+
+	if ((y > 0)            && *(gpu_texture_indices +  x +     (y - 1) * width)) d |= (1 << TASK_TEXTURE_N_BIT);
+	if ((x < (TILESX - 1)) && *(gpu_texture_indices + (x + 1) + y *      width)) d |= (1 << TASK_TEXTURE_E_BIT);
+	if ((y < (TILESY - 1)) && *(gpu_texture_indices +  x +     (y + 1) * width)) d |= (1 << TASK_TEXTURE_S_BIT);
+	if ((x > 0)            && *(gpu_texture_indices + (x - 1) + y *      width)) d |= (1 << TASK_TEXTURE_W_BIT);
 	gpu_tasks[task_num].task = ((task ^ d) & TASK_TEXTURE_BITS) ^ task;
 }
 
@@ -1629,11 +1644,14 @@ __global__ void mark_texture_neighbor_tiles( // TODO: remove __global__?
 __global__ void gen_texture_list(
 		struct tp_task   * gpu_tasks,
 		int                num_tiles,            // number of tiles in task list
+		int                width,                // number of tiles in a row
+		int                height,               // number of tiles rows
 		int              * gpu_texture_indices, // packed tile + bits (now only (1 << 7)
 		int              * num_texture_tiles,    // number of texture tiles to process
 		int              * woi)                  // min_x, min_y, max_x, max_y input
 
 {
+	int               tilesya =  ((height +3) & (~3)); //#define TILESYA       ((TILESY +3) & (~3))
 	int task_num = blockDim.x * blockIdx.x + threadIdx.x;
 	if (task_num >= num_tiles) {
 		return; // nothing to do
@@ -1659,19 +1677,23 @@ __global__ void gen_texture_list(
 
 
 	// don't care if calculate extra pixels that still fit into memory
-	int is_border = (x == woi[0]) || (y == woi[1]) || (x == (TILESX - 1)) || (y == woi[3]);
+//	int is_border = (x == woi[0]) || (y == woi[1]) || (x == (TILESX - 1)) || (y == woi[3]);
+	int is_border = (x == woi[0]) || (y == woi[1]) || (x == (width - 1)) || (y == woi[3]);
 	int buff_head = 0;
 	int num_offset = 0;
 	if (x & 1) {
-		buff_head += TILESX * (TILESYA >> 2); //TILESYA - 2 LSB == 00
+//		buff_head += TILESX * (TILESYA >> 2); //TILESYA - 2 LSB == 00
+		buff_head += width * (tilesya >> 2); //TILESYA - 2 LSB == 00
 		num_offset += 2; // int *
 	}
 	if (y & 1) {
-		buff_head += TILESX * (TILESYA >> 1);
+//		buff_head += TILESX * (TILESYA >> 1);
+		buff_head += width * (tilesya >> 1);
 		num_offset += 4; // int *
 	}
 	if (is_border){
-		buff_head += (TILESX * (TILESYA >> 2) - 1); // end of the buffer
+//		buff_head += (TILESX * (TILESYA >> 2) - 1); // end of the buffer
+		buff_head += (width * (tilesya >> 2) - 1); // end of the buffer
 		num_offset += 1; // int *
 	}
 	gpu_texture_indices += buff_head;
@@ -1690,7 +1712,8 @@ __global__ void gen_texture_list(
 	}
 	__syncthreads();// __syncwarp();
 #endif // DEBUG12
-	*(gpu_texture_indices + buf_offset) = task | ((x + y * TILESX) << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT);
+//	*(gpu_texture_indices + buf_offset) = task | ((x + y * TILESX) << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT);
+	*(gpu_texture_indices + buf_offset) = task | ((x + y * width) << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT);
 }
 
 /**
