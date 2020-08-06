@@ -68,6 +68,7 @@ extern "C" __global__ void correlate2D(
 		float             fat_zero,           // here - absolute
 		struct tp_task  * gpu_tasks,          // array of per-tile tasks (now bits 4..9 - correlation pairs)
 		int               num_tiles,          // number of tiles in task
+		int               tilesx,             // number of tile rows
 		int             * gpu_corr_indices,   // packed tile+pair
 		int             * pnum_corr_tiles,    // pointer to a number of correlation tiles to process
 		const size_t      corr_stride,        // in floats
@@ -78,6 +79,7 @@ extern "C" __global__ void correlate2D(
 extern "C" __global__ void textures_nonoverlap(
 		struct tp_task  * gpu_tasks,
 		int               num_tiles,          // number of tiles in task list
+//		int               num_tilesx,         // number of tiles in a row
 // declare arrays in device code?
 		int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
 		int             * pnum_texture_tiles,  // returns total number of elements in gpu_texture_indices array

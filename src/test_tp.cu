@@ -1015,7 +1015,8 @@ int main(int argc, char **argv)
 		30.0,                       // float             fat_zero,           // here - absolute
 		gpu_tasks,                  // struct tp_task  * gpu_tasks,
 		tp_task_size,               // int               num_tiles) // number of tiles in task
-		gpu_corr_indices,           //  int            * gpu_corr_indices,   // packed tile+pair
+		TILESX,                     // int               tilesx,             // number of tile rows
+		gpu_corr_indices,           // int             * gpu_corr_indices,   // packed tile+pair
 		gpu_num_corr_tiles,         // int             * pnum_corr_tiles,    // pointer to a number of correlation tiles to process
 		dstride_corr/sizeof(float), // const size_t      corr_stride,        // in floats
 		CORR_OUT_RAD,               // int               corr_radius,        // radius of the output correlation (7 for 15x15)
@@ -1089,6 +1090,8 @@ int main(int argc, char **argv)
     	textures_nonoverlap<<<1,1>>> (
                 gpu_tasks,             // struct tp_task   * gpu_tasks,
                 tp_task_size,          // int                num_tiles,          // number of tiles in task list
+//				TILESX,                // int                num_tilesx,         // number of tiles in a row
+
     	// declare arrays in device code?
 				gpu_texture_indices,   // int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
 				gpu_num_texture_tiles, // int             * pnum_texture_tiles,  // returns total number of elements in gpu_texture_indices array
@@ -1098,18 +1101,10 @@ int main(int argc, char **argv)
 				texture_colors,        // int               colors,             // number of colors (3/1)
 				(texture_colors == 1), // int               is_lwir,            // do not perform shot correction
 				gpu_generate_RBGA_params,
-/*
-	            10.0,                  // float             min_shot,           // 10.0
-	            3.0,                   // float             scale_shot,         // 3.0
-	            1.5f,                  // float             diff_sigma,         // pixel value/pixel change
-	            10.0f,                 // float             diff_threshold,     // pixel value/pixel change
-	            3.0,                   // float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
-*/
 				gpu_color_weights,     // float             weights[3],         // scale for R
 				1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
     	// combining both non-overlap and overlap (each calculated if pointer is not null )
 				0, // dstride_textures/sizeof(float), // size_t            texture_stride,     // in floats (now 256*4 = 1024)  // may be 0 if not needed
-//				gpu_textures,         // float           * gpu_texture_tiles,  // (number of colors +1 + ?)*16*16 rgba texture tiles    // may be 0 if not needed
 				(float *) 0,          // gpu_textures,         // float           * gpu_texture_tiles,  // (number of colors +1 + ?)*16*16 rgba texture tiles    // may be 0 if not needed
 				gpu_diff_rgb_combo);  // float           * gpu_diff_rgb_combo); // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS] // may be 0 if not needed
     	getLastCudaError("Kernel failure");

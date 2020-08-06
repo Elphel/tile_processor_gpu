@@ -866,12 +866,14 @@ __global__ void index_direct(
 __global__ void index_correlate(
 		struct tp_task   * gpu_tasks,
 		int                num_tiles,         // number of tiles in task
+		int                width,                // number of tiles in a row
 		int *              gpu_corr_indices,  // array of correlation tasks
 		int *              pnum_corr_tiles);  // pointer to the length of correlation tasks array
 
 __global__ void create_nonoverlap_list(
 		struct tp_task   * gpu_tasks,
 		int                num_tiles,           // number of tiles in task
+		int                width,                // number of tiles in a row
 		int *              nonoverlap_list,     // pointer to the calculated number of non-zero tiles
 		int *              pnonoverlap_length);  //  indices to gpu_tasks  // should be initialized to zero
 
@@ -957,6 +959,7 @@ extern "C" __global__ void correlate2D(
 		float             fat_zero,           // here - absolute
 		struct tp_task  * gpu_tasks,          // array of per-tile tasks (now bits 4..9 - correlation pairs)
 		int               num_tiles,          // number of tiles in task
+		int               tilesx,             // number of tile rows
 		int             * gpu_corr_indices,   // packed tile+pair
 		int             * pnum_corr_tiles,    // pointer to a number of correlation tiles to process
 		const size_t      corr_stride,        // in floats
@@ -970,6 +973,7 @@ extern "C" __global__ void correlate2D(
 		 index_correlate<<<blocks0,threads0>>>(
 				 gpu_tasks,           // struct tp_task   * gpu_tasks,
 				 num_tiles,           // int                num_tiles,          // number of tiles in task
+				 tilesx,              // int                width,                // number of tiles in a row
 				 gpu_corr_indices,    // int *              gpu_corr_indices,  // array of correlation tasks
 				 pnum_corr_tiles);    // int *              pnum_corr_tiles);   // pointer to the length of correlation tasks array
 		 cudaDeviceSynchronize();
@@ -1752,6 +1756,7 @@ __global__ void index_direct(
 __global__ void create_nonoverlap_list(
 		struct tp_task   * gpu_tasks,
 		int                num_tiles,           // number of tiles in task
+		int                width,                // number of tiles in a row
 		int *              nonoverlap_list,     // pointer to the calculated number of non-zero tiles
 		int *              pnonoverlap_length)  //  indices to gpu_tasks  // should be initialized to zero
 {
@@ -1763,7 +1768,8 @@ __global__ void create_nonoverlap_list(
 		return; // nothing to do
 	}
 	int cxy = gpu_tasks[num_tile].txy;
-	int texture_task_code = (((cxy & 0xffff) + (cxy >> 16) * TILESX) << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT) | TASK_TEXTURE_BITS;
+//	int texture_task_code = (((cxy & 0xffff) + (cxy >> 16) * TILESX) << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT) | TASK_TEXTURE_BITS;
+	int texture_task_code = (((cxy & 0xffff) + (cxy >> 16) * width) << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT) | TASK_TEXTURE_BITS;
 	if (gpu_tasks[num_tile].task != 0) {
 		nonoverlap_list[atomicAdd(pnonoverlap_length, 1)] = texture_task_code;
 	}
@@ -1781,6 +1787,7 @@ __global__ void create_nonoverlap_list(
 __global__ void index_correlate(
 		struct tp_task   * gpu_tasks,
 		int                num_tiles,         // number of tiles in task
+		int                width,                // number of tiles in a row
 		int *              gpu_corr_indices,  // array of correlation tasks
 		int *              pnum_corr_tiles)   // pointer to the length of correlation tasks array
 {
@@ -1795,7 +1802,8 @@ __global__ void index_correlate(
 		int txy = gpu_tasks[num_tile].txy;
 		int tx = txy & 0xffff;
 		int ty = txy >> 16;
-		int nt = ty * TILESX + tx;
+//		int nt = ty * TILESX + tx;
+		int nt = ty * width + tx;
 		for (int b = 0; b < NUM_PAIRS; b++) if ((cm & (1 << b)) != 0) {
 			gpu_corr_indices[indx++] = (nt << CORR_NTILE_SHIFT) | b;
 		}
@@ -2011,6 +2019,7 @@ __global__ void convert_correct_tiles(
 extern "C" __global__ void textures_nonoverlap(
 		struct tp_task  * gpu_tasks,
 		int               num_tiles,          // number of tiles in task list
+//		int               num_tilesx,         // number of tiles in a row
 // declare arrays in device code?
 		int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
 		int             * pnum_texture_tiles,  // returns total number of elements in gpu_texture_indices array
@@ -2033,6 +2042,7 @@ extern "C" __global__ void textures_nonoverlap(
 		float           * gpu_texture_tiles,  // (number of colors +1 + ?)*16*16 rgba texture tiles
 		float           * gpu_diff_rgb_combo) // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
 {
+	int num_tilesx =  TILESX;
 	float             min_shot = params[0];           // 10.0
 	float             scale_shot = params[1];         // 3.0
 	float             diff_sigma = params[2];         // pixel value/pixel change
@@ -2047,8 +2057,9 @@ extern "C" __global__ void textures_nonoverlap(
 		 create_nonoverlap_list<<<blocks0,threads0>>>(
 				 gpu_tasks,           // struct tp_task   * gpu_tasks,
 				 num_tiles,           // int                num_tiles,           // number of tiles in task
+				 num_tilesx,          // int                width,                // number of tiles in a row
 				 gpu_texture_indices, // int *              nonoverlap_list,     // pointer to the calculated number of non-zero tiles
-				 pnum_texture_tiles);  // int *              pnonoverlap_length)  //  indices to gpu_tasks  // should be initialized to zero
+				 pnum_texture_tiles); // int *              pnonoverlap_length)  //  indices to gpu_tasks  // should be initialized to zero
 		 cudaDeviceSynchronize();
 		 dim3 threads_texture(TEXTURE_THREADS_PER_TILE, NUM_CAMS, 1); // TEXTURE_TILES_PER_BLOCK, 1);
 		 dim3 grid_texture((*pnum_texture_tiles + TEXTURE_TILES_PER_BLOCK-1) / TEXTURE_TILES_PER_BLOCK,1,1);
