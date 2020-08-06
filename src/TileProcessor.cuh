@@ -832,6 +832,7 @@ __global__ void clear_texture_list(
 __global__ void mark_texture_tiles(
 		struct tp_task   * gpu_tasks,
 		int                num_tiles,            // number of tiles in task list
+		int                width,                // number of tiles in a row
 		int              * gpu_texture_indices); // packed tile + bits (now only (1 << 7)
 
 __global__ void mark_texture_neighbor_tiles(
@@ -1305,6 +1306,7 @@ extern "C" __global__ void generate_RBGA(
 		mark_texture_tiles <<<blocks,threads>>>(
 				gpu_tasks,
 				num_tiles,          // number of tiles in task list
+				width,              // number of tiles in a row
 				gpu_texture_indices); // packed tile + bits (now only (1 << 7)
 		cudaDeviceSynchronize();
 	    // mark n/e/s/w used tiles from gpu_texture_indices memory to gpu_tasks lower 4 bits
@@ -1482,6 +1484,7 @@ __global__ void prepare_texture_list(
 		mark_texture_tiles <<<blocks,threads>>>(
 				gpu_tasks,
 				num_tiles,          // number of tiles in task list
+				width,
 				gpu_texture_indices); // packed tile + bits (now only (1 << 7)
 		cudaDeviceSynchronize();
 	    // mark n/e/s/w used tiles from gpu_texture_indices memory to gpu_tasks lower 4 bits
@@ -1546,6 +1549,7 @@ __global__ void clear_texture_list(
  *
  * @param gpu_tasks            array of per-tile tasks (struct tp_task)
  * @param num_tiles            number of tiles int gpu_tasks array prepared for processing
+ * @param width                number of tiles in a row
  * @param gpu_texture_indices  allocated array - 1 integer per tile to process
  */
 
@@ -1553,6 +1557,7 @@ __global__ void clear_texture_list(
 __global__ void mark_texture_tiles(
 		struct tp_task   * gpu_tasks,
 		int                num_tiles,           // number of tiles in task list
+		int                width,               // number of tiles in a row
 		int              * gpu_texture_indices) // packed tile + bits (now only (1 << 7)
 {
 	int task_num = blockDim.x * blockIdx.x + threadIdx.x;
@@ -1564,7 +1569,7 @@ __global__ void mark_texture_tiles(
 		return; // NOP tile
 	}
 	int cxy = gpu_tasks[task_num].txy;
-	*(gpu_texture_indices + (cxy & 0xffff) + (cxy >> 16) * TILESX) = 1;
+	*(gpu_texture_indices + (cxy & 0xffff) + (cxy >> 16) * width) = 1; // TILESX) = 1;
 }
 
 /**
