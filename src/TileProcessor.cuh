@@ -1751,13 +1751,14 @@ __global__ void index_direct(
  *
  * @param gpu_tasks            array of per-tile tasks (struct tp_task)
  * @param num_tiles            number of tiles int gpu_tasks array prepared for processing
+ * @param width                number of tiles in a row
  * @param nonoverlap_list      integer array to place the generated list
  * @param pnonoverlap_length   single-element integer array return generated list length
  */
 __global__ void create_nonoverlap_list(
 		struct tp_task   * gpu_tasks,
 		int                num_tiles,           // number of tiles in task
-		int                width,                // number of tiles in a row
+		int                width,               // number of tiles in a row
 		int *              nonoverlap_list,     // pointer to the calculated number of non-zero tiles
 		int *              pnonoverlap_length)  //  indices to gpu_tasks  // should be initialized to zero
 {
@@ -2030,14 +2031,8 @@ extern "C" __global__ void textures_nonoverlap(
 		int               colors,             // number of colors (3/1)
 		int               is_lwir,            // do not perform shot correction
 		float             params[5],
-//		float             min_shot,           // 10.0
-//		float             scale_shot,         // 3.0
-//		float             diff_sigma,         // pixel value/pixel change
-//		float             diff_threshold,     // pixel value/pixel change
-//		float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
 		float             weights[3],         // scale for R,B,G
 		int               dust_remove,        // Do not reduce average weight when only one image differs much from the average
-//		int               keep_weights,       // return channel weights after A in RGBA (was removed) (should be 0 if gpu_texture_rbg)?
 // combining both non-overlap and overlap (each calculated if pointer is not null )
 		size_t            texture_stride,     // in floats (now 256*4 = 1024)
 		float           * gpu_texture_tiles,  // (number of colors +1 + ?)*16*16 rgba texture tiles
