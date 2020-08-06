@@ -944,6 +944,7 @@ extern "C" __global__ void textures_accumulate(
  * @param fat_zero         add this value squared to the sum of squared components before normalization
  * @param gpu_tasks        array of per-tile tasks (now bits 4..9 - correlation pairs)
  * @param num_tiles        number of tiles int gpu_tasks array prepared for processing
+ * @param tilesx           number of tile rows
  * @param gpu_corr_indices allocated array for per-tile correlation tasks (4 bytes per tile)
  * @param pnum_corr_tiles  allocated space for pointer to a number of number of correlation tiles to process
  * @param corr_stride,     stride (in floats) for correlation outputs.

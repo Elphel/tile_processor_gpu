@@ -89,14 +89,8 @@ extern "C" __global__ void textures_nonoverlap(
 		int               colors,             // number of colors (3/1)
 		int               is_lwir,            // do not perform shot correction
 		float             params[5],
-//		float             min_shot,           // 10.0
-//		float             scale_shot,         // 3.0
-//		float             diff_sigma,         // pixel value/pixel change
-//		float             diff_threshold,     // pixel value/pixel change
-//		float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
 		float             weights[3],         // scale for R,B,G
 		int               dust_remove,        // Do not reduce average weight when only one image differs much from the average
-//		int               keep_weights,       // return channel weights after A in RGBA (was removed) (should be 0 if gpu_texture_rbg)?
 // combining both non-overlap and overlap (each calculated if pointer is not null )
 		size_t            texture_stride,     // in floats (now 256*4 = 1024)  // may be 0 if not needed
 		float           * gpu_texture_tiles,  // (number of colors +1 + ?)*16*16 rgba texture tiles    // may be 0 if not needed
@@ -141,13 +135,6 @@ extern "C" __global__ void generate_RBGA(
 		int               colors,             // number of colors (3/1)
 		int               is_lwir,            // do not perform shot correction
 		float             params[5],          // mitigating CUDA_ERROR_INVALID_PTX
-		/*
-			float             min_shot,           // 10.0
-			float             scale_shot,         // 3.0
-			float             diff_sigma,         // pixel value/pixel change
-			float             diff_threshold,     // pixel value/pixel change
-			float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
-		 */
 		float             weights[3],         // scale for R,B,G
 		int               dust_remove,        // Do not reduce average weight when only one image differs much from the average
 		int               keep_weights,       // return channel weights after A in RGBA (was removed)
