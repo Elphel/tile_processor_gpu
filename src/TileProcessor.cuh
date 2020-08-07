@@ -928,7 +928,9 @@ extern "C" __global__ void textures_accumulate(
 		float           * gpu_texture_rbg,    // (number of colors +1 + ?)*16*16 rgba texture tiles
 		size_t            texture_stride,     // in floats (now 256*4 = 1024)
 		float           * gpu_texture_tiles,  // (number of colors +1 + ?)*16*16 rgba texture tiles
-		float           * gpu_diff_rgb_combo); // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
+		float           * gpu_diff_rgb_combo, //'); // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
+		int               tilesx)
+;
 
 // ====== end of local declarations ====
 
@@ -1415,8 +1417,8 @@ extern "C" __global__ void generate_RBGA(
 						gpu_texture_tiles,               // float           * gpu_texture_rbg,     // (number of colors +1 + ?)*16*16 rgba texture tiles
 			    		0,                               // size_t      texture_stride,     // in floats (now 256*4 = 1024)
 						gpu_texture_tiles, //(float *)0);// float           * gpu_texture_tiles);  // (number of colors +1 + ?)*16*16 rgba texture tiles
-						(float *)0);//gpu_diff_rgb_combo);             // float           * gpu_diff_rgb_combo) // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
-
+						(float *)0, //);//gpu_diff_rgb_combo);             // float           * gpu_diff_rgb_combo) // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
+						width);
 				cudaDeviceSynchronize(); // not needed yet, just for testing
 				/* */
 			}
@@ -2036,9 +2038,11 @@ extern "C" __global__ void textures_nonoverlap(
 // combining both non-overlap and overlap (each calculated if pointer is not null )
 		size_t            texture_stride,     // in floats (now 256*4 = 1024)
 		float           * gpu_texture_tiles,  // (number of colors +1 + ?)*16*16 rgba texture tiles
-		float           * gpu_diff_rgb_combo) // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
+		float           * gpu_diff_rgb_combo, // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
+		int               num_tilesx)
+// num_tilesx in the end - worked, after num_tiles - did not compile with JIT in Eclipse
 {
-	int num_tilesx =  TILESX;
+//	int num_tilesx =  TILESX;
 	float             min_shot = params[0];           // 10.0
 	float             scale_shot = params[1];         // 3.0
 	float             diff_sigma = params[2];         // pixel value/pixel change
@@ -2081,7 +2085,8 @@ extern "C" __global__ void textures_nonoverlap(
 				 (float *) 0,                     // float           * gpu_texture_rbg,     // (number of colors +1 + ?)*16*16 rgba texture tiles
 				 texture_stride,                  // size_t      texture_stride,     // in floats (now 256*4 = 1024)
 				 gpu_texture_tiles,               //(float *)0);// float           * gpu_texture_tiles);  // (number of colors +1 + ?)*16*16 rgba texture tiles
-				 gpu_diff_rgb_combo);             // float           * gpu_diff_rgb_combo) // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
+				 gpu_diff_rgb_combo, //);             // float           * gpu_diff_rgb_combo) // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
+				 num_tilesx);
 	 }
 }
 
@@ -2137,8 +2142,10 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 		float           * gpu_texture_rbg,    // (number of colors +1 + ?)*16*16 rgba texture tiles
 		size_t            texture_stride,     // in floats (now 256*4 = 1024)
 		float           * gpu_texture_tiles,  // (number of colors +1 + ?)*16*16 rgba texture tiles
-		float           * gpu_diff_rgb_combo) // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
+		float           * gpu_diff_rgb_combo, //) // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
+		int               tilesx)
 {
+//	int tilesx = TILESX;
 	//						(float *) gpu_geometry_correction ->pXY0,
 //	float weights[3] = {weight0, weight1, weight2};
 	// will process exactly 4 cameras in one block (so this number is not adjustable here NUM_CAMS should be == 4 !
@@ -2476,8 +2483,8 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 			}
 		}
 		int slice_stride = texture_rbg_stride * (*(woi + 3) + 1) * DTT_SIZE; // offset to the next color
-		int tileY = tile_num / TILESX; // slow, but 1 per tile
-		int tileX = tile_num - tileY * TILESX;
+		int tileY = tile_num / tilesx; // TILESX; // slow, but 1 per tile
+		int tileX = tile_num - tileY * tilesx; // TILESX;
 		int tile_x0 = (tileX - *(woi + 0)) * DTT_SIZE; //  - (DTT_SIZE/2); // may be negative == -4
 		int tile_y0 = (tileY - *(woi + 1)) * DTT_SIZE; //  - (DTT_SIZE/2); // may be negative == -4
 ///		int height = *(woi + 3) << DTT_SIZE_LOG2;
