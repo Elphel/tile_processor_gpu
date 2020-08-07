@@ -101,13 +101,13 @@ GPU run time =523.451927ms, (direct conversion: 24.080189999999998ms, imclt: 17.
 
 
 #define KERNELS_STEP  (1 << KERNELS_LSTEP)
-//#define TILES-X        (IMG_WIDTH / DTT_SIZE)
-#define TILESY        (IMG_HEIGHT / DTT_SIZE)
+//#define TILES-X        (IMG-WIDTH / DTT_SIZE)
+//#define TILES-Y        (IMG-HEIGHT / DTT_SIZE)
 #define CONVERT_DIRECT_INDEXING_THREADS_LOG2 5
 #define CONVERT_DIRECT_INDEXING_THREADS (1 << CONVERT_DIRECT_INDEXING_THREADS_LOG2) // 32
 
 // Make TILES-YA >= TILES-X and a multiple of 4
-//#define TILES-YA       ((TILESY +3) & (~3))
+//#define TILES-YA       ((TILES-Y +3) & (~3))
 
 // increase row length by 1 so vertical passes will use different ports
 #define MCLT_UNION_LEN   (DTT_SIZE2 * (DTT_SIZE2 + 2))
@@ -840,6 +840,7 @@ __global__ void mark_texture_neighbor_tiles(
 		struct tp_task   * gpu_tasks,
 		int                num_tiles,           // number of tiles in task list
 		int                width,               // number of tiles in a row
+		int                height,              // number of tiles rows
 		int              * gpu_texture_indices, // packed tile + bits (now only (1 << 7)
 		int              * woi);                // x,y,width,height of the woi
 
@@ -1301,7 +1302,7 @@ extern "C" __global__ void generate_RBGA(
 	float             diff_sigma = params[2];         // pixel value/pixel change
 	float             diff_threshold = params[3];     // pixel value/pixel change
 	float             min_agree = params[4];          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
-	int               tilesya =  ((height +3) & (~3)); //#define TILES-YA       ((TILESY +3) & (~3))
+	int               tilesya =  ((height +3) & (~3)); //#define TILES-YA       ((TILES-Y +3) & (~3))
 	dim3 threads0((1 << THREADS_DYNAMIC_BITS), 1, 1);
     int blocks_x = (width + ((1 << THREADS_DYNAMIC_BITS) - 1)) >> THREADS_DYNAMIC_BITS;
     dim3 blocks0 (blocks_x, height, 1);
@@ -1331,6 +1332,7 @@ extern "C" __global__ void generate_RBGA(
 				gpu_tasks,
 				num_tiles,           // number of tiles in task list
 				width,               // number of tiles in a row
+				height,              // number of tiles rows
 				gpu_texture_indices, // packed tile + bits (now only (1 << 7)
 				woi);                // min_x, min_y, max_x, max_y
 
@@ -1512,8 +1514,9 @@ __global__ void prepare_texture_list(
 				gpu_tasks,
 				num_tiles,           // number of tiles in task list
 				width,               // number of tiles in a row
+				height,              // number of tiles rows
 				gpu_texture_indices, // packed tile + bits (now only (1 << 7)
-				woi);               // min_x, min_y, max_x, max_y
+				woi);                // min_x, min_y, max_x, max_y
 		cudaDeviceSynchronize();
 	    // Generate tile indices list, upper 24 bits - tile index, lower 4 bits: n/e/s/w neighbors, bit 7 - set to 1
 		*(num_texture_tiles+0) = 0;
@@ -1598,6 +1601,8 @@ __global__ void mark_texture_tiles(
  *
  * @param gpu_tasks            array of per-tile tasks (struct tp_task)
  * @param num_tiles            number of tiles int gpu_tasks array prepared for processing
+ * @param width                number of tiles in a row
+ * @param height               number of tiles rows
  * @param gpu_texture_indices  allocated array - 1 integer per tile to process
  * @param woi                  4-element int array ( x,y,width,height of the woi, in tiles)
  */
@@ -1606,6 +1611,7 @@ __global__ void mark_texture_neighbor_tiles( // TODO: remove __global__?
 		struct tp_task   * gpu_tasks,
 		int                num_tiles,           // number of tiles in task list
 		int                width,               // number of tiles in a row
+		int                height,              // number of tiles rows
 		int              * gpu_texture_indices, // packed tile + bits (now only (1 << 7)
 		int              * woi)                  // x,y,width,height of the woi
 
@@ -1628,12 +1634,12 @@ __global__ void mark_texture_neighbor_tiles( // TODO: remove __global__?
 	int d = 0;
 //	if ((y > 0)            && *(gpu_texture_indices +  x +     (y - 1) * TILES-X)) d |= (1 << TASK_TEXTURE_N_BIT);
 //	if ((x < (TILES-X - 1)) && *(gpu_texture_indices + (x + 1) + y *      TILES-X)) d |= (1 << TASK_TEXTURE_E_BIT);
-//	if ((y < (TILESY - 1)) && *(gpu_texture_indices +  x +     (y + 1) * TILES-X)) d |= (1 << TASK_TEXTURE_S_BIT);
+//	if ((y < (TILES-Y - 1)) && *(gpu_texture_indices +  x +     (y + 1) * TILES-X)) d |= (1 << TASK_TEXTURE_S_BIT);
 //	if ((x > 0)            && *(gpu_texture_indices + (x - 1) + y *      TILES-X)) d |= (1 << TASK_TEXTURE_W_BIT);
 
 	if ((y > 0)            && *(gpu_texture_indices +  x +     (y - 1) * width)) d |= (1 << TASK_TEXTURE_N_BIT);
 	if ((x < (width - 1))  && *(gpu_texture_indices + (x + 1) + y *      width)) d |= (1 << TASK_TEXTURE_E_BIT);
-	if ((y < (TILESY - 1)) && *(gpu_texture_indices +  x +     (y + 1) * width)) d |= (1 << TASK_TEXTURE_S_BIT);
+	if ((y < (height - 1)) && *(gpu_texture_indices +  x +     (y + 1) * width)) d |= (1 << TASK_TEXTURE_S_BIT);
 	if ((x > 0)            && *(gpu_texture_indices + (x - 1) + y *      width)) d |= (1 << TASK_TEXTURE_W_BIT);
 	gpu_tasks[task_num].task = ((task ^ d) & TASK_TEXTURE_BITS) ^ task;
 }
@@ -1661,7 +1667,7 @@ __global__ void gen_texture_list(
 		int              * woi)                  // min_x, min_y, max_x, max_y input
 
 {
-	int               tilesya =  ((height +3) & (~3)); //#define TILES-YA       ((TILESY +3) & (~3))
+	int               tilesya =  ((height +3) & (~3)); //#define TILES-YA       ((TILES-Y +3) & (~3))
 	int task_num = blockDim.x * blockIdx.x + threadIdx.x;
 	if (task_num >= num_tiles) {
 		return; // nothing to do
@@ -1832,8 +1838,8 @@ __global__ void index_correlate(
  * @param dstride              stride (in floats) for the input Bayer images
  * @param num_tiles            number of tiles int gpu_tasks array prepared for processing
  * @param lpf_mask             apply lpf to colors : bit 0 - red, bit 1 - blue, bit2 - green. Now - always 0 !
- * @param woi_width            image width (was constant IMG_WIDTH, now variable to use with EO+LWIR
- * @param woi_height           image height (was constant IMG_HEIGHT, now variable to use with EO+LWIR
+ * @param woi_width            image width (was constant IMG-WIDTH, now variable to use with EO+LWIR
+ * @param woi_height           image height (was constant IMG-HEIGHT, now variable to use with EO+LWIR
  * @param kernels_hor          number of deconvolution kernels per image width
  * @param kernels_vert         number of deconvolution kernels per image height
  * @param gpu_active_tiles     pointer to the calculated list of tiles
@@ -1900,8 +1906,8 @@ extern "C" __global__ void convert_direct(  // called with a single block, singl
  * @param gpu_clt              output array of per-camera aberration-corrected transform-domain image representations
  * @param dstride              stride (in floats) for the input Bayer images
  * @param lpf_mask             apply lpf to colors : bit 0 - red, bit 1 - blue, bit2 - green. Now - always 0 !
- * @param woi_width            image width (was constant IMG_WIDTH, now variable to use with EO+LWIR
- * @param woi_height           image height (was constant IMG_HEIGHT, now variable to use with EO+LWIR
+ * @param woi_width            image width (was constant IMG-WIDTH, now variable to use with EO+LWIR
+ * @param woi_height           image height (was constant IMG-HEIGHT, now variable to use with EO+LWIR
  * @param kernels_hor          number of deconvolution kernels per image width
  * @param kernels_vert         number of deconvolution kernels per image height
  */
@@ -2531,7 +2537,7 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 #endif // DEBUG12
 
 			///			if (!border_tile ||
-			///					((g_row >= 0) && (g_col >= 0) && (g_row < (DTT_SIZE * TILESY)) && (g_col < (DTT_SIZE * TILES-X)))){
+			///					((g_row >= 0) && (g_col >= 0) && (g_row < (DTT_SIZE * TILES-Y)) && (g_col < (DTT_SIZE * TILES-X)))){
 			///					((g_row >= 0) && (g_col >= 0) && (g_row < height) && (g_col < (DTT_SIZE * TILES-X)))){
 			// always copy 3 (1) colors + alpha
 			if (colors == 3){
@@ -3101,8 +3107,8 @@ __device__ void normalizeTileAmplitude(
  * @param window_hor_cos       array in shared memory for window horizontal cosine [2*DTT_SIZE]
  * @param window_hor_sin       array in shared memory for window horizontal cosine [2*DTT_SIZE]
  * @param window_vert_cos      array in shared memory for window horizontal cosine [2*DTT_SIZE]
- * @param woi_width            image width (was constant IMG_WIDTH, now variable to use with EO+LWIR
- * @param woi_height           image height (was constant IMG_HEIGHT, now variable to use with EO+LWIR
+ * @param woi_width            image width (was constant IMG-WIDTH, now variable to use with EO+LWIR
+ * @param woi_height           image height (was constant IMG-HEIGHT, now variable to use with EO+LWIR
  * @param kernels_hor          number of deconvolution kernels per image width
  * @param kernels_vert         number of deconvolution kernels per image height
  */
@@ -3132,8 +3138,8 @@ __device__ void convertCorrectTile(
 {
 //	int tilesx = TILES-X;
 	// TODO: pass these values instead of constants to handle EO/LWIR
-	int max_px =   woi_width - 1; // IMG_WIDTH  - 1; // odd
-	int max_py =   woi_height - 1; // IMG_HEIGHT - 1; // odd
+	int max_px =   woi_width - 1; // IMG-WIDTH  - 1; // odd
+	int max_py =   woi_height - 1; // IMG-HEIGHT - 1; // odd
 	int max_pxm1 = max_px - 1; // even
 	int max_pym1 = max_py - 1; // even
 	int max_kernel_hor = kernels_hor - 1; // KERNELS_HOR -1;

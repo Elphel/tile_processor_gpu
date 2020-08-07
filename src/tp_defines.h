@@ -79,7 +79,7 @@
 
 // only used in C++ test
 #define TILESX        (IMG_WIDTH / DTT_SIZE)
-//#define TILESY        (IMG_HEIGHT / DTT_SIZE)
+#define TILESY        (IMG_HEIGHT / DTT_SIZE)
 #define TILESYA       ((TILESY +3) & (~3))
 
 
