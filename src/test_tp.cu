@@ -870,7 +870,9 @@ int main(int argc, char **argv)
 				KERNELS_HOR,           // int                kernels_hor,
 				KERNELS_VERT,          // int                kernels_vert);
 				gpu_active_tiles,      // int *              gpu_active_tiles,      // pointer to the calculated number of non-zero tiles
-    			gpu_num_active);       // int *              pnum_active_tiles);  //  indices to gpu_tasks
+    			gpu_num_active, //);       // int *              pnum_active_tiles);  //  indices to gpu_tasks
+				TILESX); // int                tilesx)
+
 
     	getLastCudaError("Kernel execution failed");
     	checkCudaErrors(cudaDeviceSynchronize());

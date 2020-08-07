@@ -77,6 +77,14 @@
 #define RBYRDIST_STEP             0.0004 // for doubles, 0.0002 - floats // to fit into GPU shared memory (was 0.001);
 #define TILES_PER_BLOCK_GEOM     (32/NUM_CAMS)   // each tile has NUM_CAMS threads
 
+// only used in C++ test
+#define TILESX        (IMG_WIDTH / DTT_SIZE)
+//#define TILESY        (IMG_HEIGHT / DTT_SIZE)
+#define TILESYA       ((TILESY +3) & (~3))
+
+
+
+
 #define DEBUG_OOB1 1
 
 // Use CORR_OUT_RAD for the correlation output

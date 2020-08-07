@@ -48,7 +48,7 @@ extern "C" __global__ void convert_direct( // called with a single block, single
 		float           ** gpu_kernels,        // [NUM_CAMS],
 		float           ** gpu_images,         // [NUM_CAMS],
 		struct tp_task   * gpu_tasks,
-		float           ** gpu_clt,            // [NUM_CAMS][TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
+		float           ** gpu_clt,            // [NUM_CAMS][TILES-Y][TILES-X][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 		size_t             dstride,            // in floats (pixels)
 		int                num_tiles,          // number of tiles in task
 		int                lpf_mask,           // apply lpf to colors : bit 0 - red, bit 1 - blue, bit2 - green. Now - always 0 !
@@ -57,10 +57,12 @@ extern "C" __global__ void convert_direct( // called with a single block, single
 		int                kernels_hor,
 		int                kernels_vert,
 		int *              gpu_active_tiles,      // pointer to the calculated number of non-zero tiles
-		int *              pnum_active_tiles);  //  indices to gpu_tasks
+		int *              pnum_active_tiles,  //  indices to gpu_tasks
+		int                tilesx);
+
 
 extern "C" __global__ void correlate2D(
-		float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
+		float          ** gpu_clt,            // [NUM_CAMS] ->[TILES-Y][TILES-X][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 		int               colors,             // number of colors (3/1)
 		float             scale0,             // scale for R
 		float             scale1,             // scale for B
@@ -83,7 +85,7 @@ extern "C" __global__ void textures_nonoverlap(
 // declare arrays in device code?
 		int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
 		int             * pnum_texture_tiles,  // returns total number of elements in gpu_texture_indices array
-		float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
+		float          ** gpu_clt,            // [NUM_CAMS] ->[TILES-Y][TILES-X][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 		// TODO: use geometry_correction rXY !
 		struct gc       * gpu_geometry_correction,
 		int               colors,             // number of colors (3/1)
@@ -99,7 +101,7 @@ extern "C" __global__ void textures_nonoverlap(
 
 extern "C"
 __global__ void imclt_rbg_all(
-		float           ** gpu_clt,            // [NUM_CAMS][TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
+		float           ** gpu_clt,            // [NUM_CAMS][TILES-Y][TILES-X][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 		float           ** gpu_corr_images,    // [NUM_CAMS][WIDTH, 3 * HEIGHT]
 		int                apply_lpf,
 		int                colors,
@@ -108,7 +110,7 @@ __global__ void imclt_rbg_all(
 		const size_t       dstride);            // in floats (pixels)
 
 extern "C" __global__ void imclt_rbg(
-		float           * gpu_clt,            // [TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
+		float           * gpu_clt,            // [TILES-Y][TILES-X][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 		float           * gpu_rbg,            // WIDTH, 3 * HEIGHT
 		int               apply_lpf,
 		int               mono,               // defines lpf filter
@@ -127,10 +129,10 @@ extern "C" __global__ void generate_RBGA(
 		int              * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
 		int              * num_texture_tiles,  // number of texture tiles to process  (8 separate elements for accumulation)
 		int              * woi,                // x,y,width,height of the woi
-		int                width,  // <= TILESX, use for faster processing of LWIR images (should be actual + 1)
-		int                height, // <= TILESY, use for faster processing of LWIR images
+		int                width,  // <= TILES-X, use for faster processing of LWIR images (should be actual + 1)
+		int                height, // <= TILES-Y, use for faster processing of LWIR images
 		// Parameters for the texture generation
-		float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
+		float          ** gpu_clt,            // [NUM_CAMS] ->[TILES-Y][TILES-X][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 		// TODO: use geometry_correction rXY !
 		struct gc       * gpu_geometry_correction,
 		int               colors,             // number of colors (3/1)
