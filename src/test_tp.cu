@@ -42,12 +42,9 @@
 #include <iterator>
 #include <vector>
 
-//#include "dtt8x8.cuh"
 #include "dtt8x8.h"
 #include "geometry_correction.h"
 #include "TileProcessor.cuh"
-///#include "cuda_profiler_api.h"
-//#include "cudaProfiler.h"
 
 
 float * copyalloc_kernel_gpu(float * kernel_host,
@@ -187,7 +184,6 @@ int writeFloatsToFile(float *       data, // allocated array
 					   const char *  path) // file path
 {
 
-//  std::ifstream input(path, std::ios::binary );
 	std::ofstream ofile(path, std::ios::binary);
 	ofile.write((char *) data, size * sizeof(float));
 	return 0;
@@ -298,8 +294,6 @@ int main(int argc, char **argv)
     const char* correction_vector_file =   "/data_ssd/git/tile_processor_gpu/clt/main.correction_vector";
     const char* geometry_correction_file = "/data_ssd/git/tile_processor_gpu/clt/main.geometry_correction";
 
-    // not yet used
-///    float lpf_sigmas[3] = {0.9f, 0.9f, 0.9f}; // G, B, G
 
     float port_offsets[NUM_CAMS][2] =  {// used only in textures to scale differences
 			{-0.5, -0.5},
@@ -313,7 +307,6 @@ int main(int argc, char **argv)
     int KERN_TILES = KERNELS_HOR *  KERNELS_VERT * NUM_COLORS;
     int KERN_SIZE =  KERN_TILES * 4 * 64;
 
-//    int CORR_SIZE = (2 * DTT_SIZE -1) * (2 * DTT_SIZE -1);
     int CORR_SIZE = (2 * CORR_OUT_RAD + 1) * (2 * CORR_OUT_RAD + 1);
 
 
@@ -324,7 +317,6 @@ int main(int argc, char **argv)
     static struct tp_task     task_data1 [TILESX*TILESY]; // maximal length - each tile
     trot_deriv  rot_deriv;
     int                corr_indices         [NUM_PAIRS*TILESX*TILESY];
-//    int                texture_indices      [TILESX*TILESY];
     int                texture_indices      [TILESX*TILESYA];
     int                cpu_woi              [4];
 
@@ -334,11 +326,14 @@ int main(int argc, char **argv)
     float            * gpu_images_h         [NUM_CAMS];
     float              tile_coords_h        [NUM_CAMS][TILESX * TILESY][2];
     float            * gpu_clt_h            [NUM_CAMS];
-///    float            * gpu_lpf_h            [NUM_COLORS]; // never used
     float            * gpu_corr_images_h    [NUM_CAMS];
 
-    float            * gpu_corrs;
-    int              * gpu_corr_indices;
+    float            * gpu_corrs;               // correlation tiles (per tile, per pair) in pixel domain
+    float            * gpu_corrs_td;            // correlation tiles (per tile, per pair) in transform domain
+    int              * gpu_corr_indices;        // shared by gpu_corrs gpu_corrs_td
+    float            * gpu_corrs_combo;         // correlation tiles combined (1 per tile), pixel domain
+    float            * gpu_corrs_combo_td;      // correlation tiles combined (1 per tile), transform domain
+    int              * gpu_corrs_combo_indices; // shared by gpu_corrs_combo and gpu_corrs_combo_td
 
     float            * gpu_textures;
     float            * gpu_diff_rgb_combo;
@@ -358,10 +353,8 @@ int main(int argc, char **argv)
     float           ** gpu_images; //            [NUM_CAMS];
     float           ** gpu_clt;    //            [NUM_CAMS];
     float           ** gpu_corr_images; //       [NUM_CAMS];
-///    float           ** gpu_lpf;    //            [NUM_CAMS]; // never referenced
 
     // GPU pointers to GPU memory
-//    float * gpu_tasks;
     struct tp_task  * gpu_tasks;
     int *             gpu_active_tiles;
     int *             gpu_num_active;
@@ -371,9 +364,14 @@ int main(int argc, char **argv)
     checkCudaErrors (cudaMalloc((void **)&gpu_num_active,                     sizeof(int)));
     checkCudaErrors (cudaMalloc((void **)&gpu_num_corr_tiles,                 sizeof(int)));
 
-    size_t  dstride;          // in bytes !
-    size_t  dstride_rslt;     // in bytes !
-    size_t  dstride_corr;     // in bytes ! for one 2d phase correlation (padded 15x15x4 bytes)
+    size_t  dstride;               // in bytes !
+    size_t  dstride_rslt;          // in bytes !
+    size_t  dstride_corr;          // in bytes ! for one 2d phase correlation (padded 15x15x4 bytes)
+    // in the future, dstride_corr can reuse that of dstride_corr_td?
+    size_t  dstride_corr_td;       // in bytes ! for one 2d phase correlation (padded 4x8x8x4 bytes)
+    size_t  dstride_corr_combo;    // in bytes ! for one 2d phase correlation (padded 15x15x4 bytes)
+    size_t  dstride_corr_combo_td; // in bytes ! for one 2d phase correlation (padded 4x8x8x4 bytes)
+
     size_t  dstride_textures; // in bytes ! for one rgba/ya 16x16 tile
     size_t  dstride_textures_rbga; // in bytes ! for one rgba/ya 16x16 tile
 
@@ -412,20 +410,7 @@ int main(int argc, char **argv)
 			rByRDist_length);
 
     checkCudaErrors(cudaMalloc((void **)&gpu_rot_deriv, sizeof(trot_deriv)));
-/*
-    float lpf_rbg[3][64]; // not used
-    for (int ncol = 0; ncol < 3; ncol++) {
-    	if (lpf_sigmas[ncol] > 0.0) {
-    		set_clt_lpf (
-    				lpf_rbg[ncol], // float * lpf,    // size*size array to be filled out
-					lpf_sigmas[ncol], // float   sigma,
-					8); // int     dct_size)
-    		gpu_lpf_h[ncol] = copyalloc_kernel_gpu(lpf_rbg[ncol], 64);
-    	} else {
-    		gpu_lpf_h[ncol] = NULL;
-    	}
-    }
-*/
+
     for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
         readFloatsFromFile(
         		host_kern_buf, // float * data, // allocated array
@@ -456,6 +441,24 @@ int main(int argc, char **argv)
 			CORR_SIZE,                      // int width,
 			NUM_PAIRS * TILESX * TILESY);   // int height);
     // read channel images (assuming host_kern_buf size > image size, reusing it)
+// allocate all other correlation data, some may be
+    gpu_corrs_td = alloc_image_gpu(
+    		&dstride_corr_td,               // in bytes ! for one 2d phase correlation (padded 15x15x4 bytes)
+			4 * DTT_SIZE * DTT_SIZE,         // int width,
+			NUM_PAIRS * TILESX * TILESY);    // int height);
+
+    gpu_corrs_combo = alloc_image_gpu(
+    		&dstride_corr_combo,             // in bytes ! for one 2d phase correlation (padded 15x15x4 bytes)
+			CORR_SIZE,                       // int width,
+			TILESX * TILESY);                // int height);
+
+    gpu_corrs_combo = alloc_image_gpu(
+    		&dstride_corr_combo_td,          // in bytes ! for one 2d phase correlation (padded 15x15x4 bytes)
+			4 * DTT_SIZE * DTT_SIZE,         // int width,
+			TILESX * TILESY);                // int height);
+
+
+
     for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
         readFloatsFromFile(
         		host_kern_buf, // float * data, // allocated array
@@ -539,7 +542,6 @@ int main(int argc, char **argv)
     for (int ty = 0; ty < TILESY; ty++){
     	for (int tx = 0; tx < TILESX; tx++){
     		int nt = ty * TILESX + tx;
-//    		int cm = (task_data[nt].task >> TASK_TEXTURE_BIT) & 1;
     		int cm = task_data[nt].task & TASK_TEXTURE_BITS;
     		if (cm){
     			texture_indices[num_textures++] = (nt << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT);
@@ -548,7 +550,6 @@ int main(int argc, char **argv)
     }
     // num_textures now has the total number of textures
     // copy corr_indices to gpu
-//  gpu_texture_indices = (int  *) copyalloc_kernel_gpu((float * ) texture_indices, num_textures);
     gpu_texture_indices = (int  *) copyalloc_kernel_gpu(
     		(float * ) texture_indices,
 			num_textures,
@@ -560,9 +561,9 @@ int main(int argc, char **argv)
 
     // copy port indices to gpu
     float color_weights [] = {
-            0.294118,              // float             weight0,            // scale for R
-            0.117647,              // float             weight1,            // scale for B
-            0.588235};              // float             weight2,            // scale for G
+            0.294118,              // float             weight0,            // scale for R 0.5 / (1.0 + 0.5 +0.2)
+            0.117647,              // float             weight1,            // scale for B 0.2 / (1.0 + 0.5 +0.2)
+            0.588235};              // float             weight2,            // scale for G 1.0 / (1.0 + 0.5 +0.2)
 	float generate_RBGA_params[]={
 			10.0,                  // float             min_shot,           // 10.0
             3.0,                   // float             scale_shot,         // 3.0
@@ -574,13 +575,6 @@ int main(int argc, char **argv)
 	gpu_port_offsets =         (float *) copyalloc_kernel_gpu((float * ) port_offsets, num_ports * 2);
     gpu_color_weights =        (float *) copyalloc_kernel_gpu((float * ) color_weights, sizeof(color_weights));
     gpu_generate_RBGA_params = (float *) copyalloc_kernel_gpu((float * ) generate_RBGA_params, sizeof(generate_RBGA_params));
-
-
-
-//    int keep_texture_weights = 1; // try with 0 also
-//    int texture_colors = 3; // result will be 3+1 RGBA (for mono - 2)
-
-//		double [][] rgba = new double[numcol + 1 + (keep_weights?(ports + numcol + 1):0)][];
 
     int tile_texture_size = (texture_colors + 1 + (keep_texture_weights? (NUM_CAMS + texture_colors + 1): 0)) *256;
 
@@ -597,11 +591,9 @@ int main(int argc, char **argv)
     		&dstride_textures_rbga,              // in bytes ! for one rgba/ya 16x16 tile
 			rgba_width,              // int width (floats),
 			rgba_height * rbga_slices);               // int height);
-//    checkCudaErrors(cudaMalloc((void **)&gpu_diff_rgb_combo,  TILESX * TILESY * NUM_CAMS * (NUM_COLS+1)* sizeof(float)));
     checkCudaErrors(cudaMalloc((void **)&gpu_diff_rgb_combo,  TILESX * TILESY * NUM_CAMS * (NUM_COLORS + 1) * sizeof(float)));
 
     // Now copy arrays of per-camera pointers to GPU memory to GPU itself
-
     gpu_kernels =        copyalloc_pointers_gpu (gpu_kernels_h,     NUM_CAMS);
     gpu_kernel_offsets = (struct CltExtra **) copyalloc_pointers_gpu ((float **) gpu_kernel_offsets_h, NUM_CAMS);
     gpu_images =         copyalloc_pointers_gpu (gpu_images_h,      NUM_CAMS);
@@ -620,8 +612,6 @@ int main(int argc, char **argv)
 
 #define TEST_ROT_MATRICES
 #ifdef  TEST_ROT_MATRICES
-//    dim3 threads_rot(3,3,NUM_CAMS);
-//   dim3 grid_rot   (1, 1, 1);
     dim3 threads_rot(3,3,3);
     dim3 grid_rot   (NUM_CAMS, 1, 1);
 
@@ -657,36 +647,6 @@ int main(int argc, char **argv)
 			gpu_rot_deriv,
 			sizeof(trot_deriv),
 			cudaMemcpyDeviceToHost));
-#if 0
-	const char* matrices_names[] = {
-	    		"rot","d_daz","d_tilt","d_roll","d_zoom"};
-    for (int i = 0; i < 5;i++){
-		printf("Matrix %s for camera\n",matrices_names[i]);
-		for (int row = 0; row<3; row++){
-			for (int ncam = 0; ncam<NUM_CAMS;ncam++){
-				for (int col = 0; col <3; col++){
-
-#ifdef NVRTC_BUG
-					//abuse - exceeding first dimension
-					printf("%9.6f,",rot_deriv.rots[i*NUM_CAMS+ncam][row][col]);
-#else
-					printf("%9.6f,",rot_deriv.matrices[i][ncam][row][col]);
-#endif
-					if (col == 2){
-						if (ncam == (NUM_CAMS-1)){
-							printf("\n");
-						} else {
-							printf("   ");
-						}
-					} else {
-						printf(" ");
-					}
-				}
-			}
-		}
-    }
-#endif //#if 0
-
 
 #endif // TEST_ROT_MATRICES
 
@@ -789,10 +749,6 @@ int main(int argc, char **argv)
     sdkDeleteTimer(&timerGEOM);
     printf("Average TextureList run time =%f ms\n",  avgTimeGEOM);
 
-//    gpu_tasks = (struct tp_task  *) copyalloc_kernel_gpu((float * ) &task_data, tp_task_size * (sizeof(struct tp_task)/sizeof(float)));
-//    static struct tp_task     task_data1 [TILESX*TILESY]; // maximal length - each tile
-/// DBG_TILE
-
 	checkCudaErrors(cudaMemcpy( // copy modified/calculated tasks
 			&task_data1,
 			gpu_tasks,
@@ -824,9 +780,6 @@ int main(int argc, char **argv)
 #endif // TEST_GEOM_CORR
 
 
-
-
-
     //create and start CUDA timer
     StopWatchInterface *timerTP = 0;
     sdkCreateTimer(&timerTP);
@@ -841,10 +794,6 @@ int main(int argc, char **argv)
     printf("threads_tp=(%d, %d, %d)\n",threads_tp.x,threads_tp.y,threads_tp.z);
     printf("grid_tp=   (%d, %d, %d)\n",grid_tp.x,   grid_tp.y,   grid_tp.z);
 
-
-
-//    cudaFuncSetCacheConfig(convert_correct_tiles, cudaFuncCachePreferShared);
-//    cudaFuncSetCacheConfig(convert_correct_tiles, cudaFuncCachePreferShared);
     ///    cudaProfilerStart();
     float ** fgpu_kernel_offsets = (float **) gpu_kernel_offsets; //    [NUM_CAMS];
 
@@ -878,7 +827,6 @@ int main(int argc, char **argv)
     	checkCudaErrors(cudaDeviceSynchronize());
     	printf("%d\n",i);
     }
-    //    checkCudaErrors(cudaDeviceSynchronize());
     sdkStopTimer(&timerTP);
     float avgTime = (float)sdkGetTimerValue(&timerTP) / (float)numIterations;
     sdkDeleteTimer(&timerTP);
@@ -927,10 +875,6 @@ int main(int argc, char **argv)
     }
 #endif
 
-
-    // testing imclt
-//    dim3 threads_imclt(IMCLT_THREADS_PER_TILE, IMCLT_TILES_PER_BLOCK, 1);
-//    printf("threads_imclt=(%d, %d, %d)\n",threads_imclt.x,threads_imclt.y,threads_imclt.z);
     StopWatchInterface *timerIMCLT = 0;
     sdkCreateTimer(&timerIMCLT);
 
@@ -993,10 +937,7 @@ int main(int argc, char **argv)
 
 #ifndef NOCORR
 //    cudaProfilerStart();
-    // testing corr
-//    dim3 threads_corr(CORR_THREADS_PER_TILE, CORR_TILES_PER_BLOCK, 1);
-    //        dim3 grid_corr((num_corrs + CORR_TILES_PER_BLOCK-1) / CORR_TILES_PER_BLOCK,1,1);
- //   printf("threads_corr=(%d, %d, %d)\n",threads_corr.x,threads_corr.y,threads_corr.z);
+// testing corr
     StopWatchInterface *timerCORR = 0;
     sdkCreateTimer(&timerCORR);
 
@@ -1011,9 +952,9 @@ int main(int argc, char **argv)
         correlate2D<<<1,1>>>(
 		gpu_clt,                    // float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 		3,                          // int               colors,             // number of colors (3/1)
-		0.25,                       // float             scale0,             // scale for R
-		0.25,                       // float             scale1,             // scale for B
-		0.5,                        // float             scale2,             // scale for G
+		color_weights[0], // 0.25,  // float             scale0,             // scale for R
+		color_weights[1], // 0.25,  // float             scale1,             // scale for B
+		color_weights[2], // 0.5,   // float             scale2,             // scale for G
 		30.0,                       // float             fat_zero,           // here - absolute
 		gpu_tasks,                  // struct tp_task  * gpu_tasks,
 		tp_task_size,               // int               num_tiles) // number of tiles in task
@@ -1092,8 +1033,6 @@ int main(int argc, char **argv)
     	textures_nonoverlap<<<1,1>>> (
                 gpu_tasks,             // struct tp_task   * gpu_tasks,
                 tp_task_size,          // int                num_tiles,          // number of tiles in task list
-//				TILESX,                // int                num_tilesx,         // number of tiles in a row
-
     	// declare arrays in device code?
 				gpu_texture_indices,   // int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
 				gpu_num_texture_tiles, // int             * pnum_texture_tiles,  // returns total number of elements in gpu_texture_indices array
@@ -1122,8 +1061,6 @@ int main(int argc, char **argv)
 
     int rslt_texture_size =   num_textures * tile_texture_size;
     float * cpu_textures = (float *)malloc(rslt_texture_size * sizeof(float));
-
-
 
     checkCudaErrors(cudaMemcpy2D(
     		cpu_textures,
@@ -1156,92 +1093,12 @@ int main(int argc, char **argv)
     				printf(" ");
     			}
     		}
-//    int tile_texture_size = (texture_colors + 1 + (keep_texture_weights? (NUM_CAMS + texture_colors + 1): 0)) *256;
 #endif // DEBUG9
 #endif
     		free(cpu_textures);
 #endif // ifndef NOTEXTURES
 
 
-#undef GEN_TEXTURE_LIST
-#ifdef  GEN_TEXTURE_LIST
-    		dim3 threads_list(1,1, 1); // TEXTURE_TILES_PER_BLOCK, 1);
-    		dim3 grid_list   (1,1,1);
-    		printf("threads_list=(%d, %d, %d)\n",threads_list.x,threads_list.y,threads_list.z);
-    		printf("grid_list=(%d, %d, %d)\n",grid_list.x,grid_list.y,grid_list.z);
-    		StopWatchInterface *timerTEXTURELIST = 0;
-    		sdkCreateTimer(&timerTEXTURELIST);
-    		for (int i = i0; i < numIterations; i++)
-    		{
-    			if (i == 0)
-    			{
-    				checkCudaErrors(cudaDeviceSynchronize());
-    				sdkResetTimer(&timerTEXTURELIST);
-    				sdkStartTimer(&timerTEXTURELIST);
-    			}
-
-    			prepare_texture_list<<<grid_list,threads_list>>> (
-    					gpu_tasks,             // struct tp_task   * gpu_tasks,
-						tp_task_size,          // int                num_tiles,          // number of tiles in task list
-						gpu_texture_indices,   // int              * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
-						gpu_num_texture_tiles, // int              * num_texture_tiles,  // number of texture tiles to process (8 elements)
-						gpu_woi,               // int              * woi,                // x,y,width,height of the woi
-						TILESX,                // int                width,  // <= TILESX, use for faster processing of LWIR images (should be actual + 1)
-						TILESY);               // int                height); // <= TILESY, use for faster processing of LWIR images
-
-    			getLastCudaError("Kernel failure");
-    			checkCudaErrors(cudaDeviceSynchronize());
-    			printf("test pass: %d\n",i);
-    		}
-    		///	cudaProfilerStop();
-    		sdkStopTimer(&timerTEXTURELIST);
-    		float avgTimeTEXTURESLIST = (float)sdkGetTimerValue(&timerTEXTURELIST) / (float)numIterations;
-    		sdkDeleteTimer(&timerTEXTURELIST);
-    		printf("Average TextureList run time =%f ms\n",  avgTimeTEXTURESLIST);
-
-    		int cpu_num_texture_tiles[8];
-    		checkCudaErrors(cudaMemcpy(
-    				cpu_woi,
-					gpu_woi,
-					4 * sizeof(float),
-					cudaMemcpyDeviceToHost));
-    		printf("WOI x=%d, y=%d, width=%d, height=%d\n", cpu_woi[0], cpu_woi[1], cpu_woi[2], cpu_woi[3]);
-    		checkCudaErrors(cudaMemcpy(
-    				cpu_num_texture_tiles,
-					gpu_num_texture_tiles,
-					8 * sizeof(float), // 8 sequences (0,2,4,6 - non-border, growing up;
-					//1,3,5,7 - border, growing down from the end of the corresponding non-border buffers
-					cudaMemcpyDeviceToHost));
-    		printf("cpu_num_texture_tiles=(%d(%d), %d(%d), %d(%d), %d(%d) -> %d tp_task_size=%d)\n",
-    				cpu_num_texture_tiles[0], cpu_num_texture_tiles[1],
-					cpu_num_texture_tiles[2], cpu_num_texture_tiles[3],
-					cpu_num_texture_tiles[4], cpu_num_texture_tiles[5],
-					cpu_num_texture_tiles[6], cpu_num_texture_tiles[7],
-    				cpu_num_texture_tiles[0] + cpu_num_texture_tiles[1] +
-					cpu_num_texture_tiles[2] + cpu_num_texture_tiles[3] +
-					cpu_num_texture_tiles[4] + cpu_num_texture_tiles[5] +
-					cpu_num_texture_tiles[6] + cpu_num_texture_tiles[7],
-					tp_task_size
-					);
-    		for (int q = 0; q < 4; q++) {
-    			checkCudaErrors(cudaMemcpy(
-    					texture_indices  + q * TILESX * (TILESYA >> 2),
-						gpu_texture_indices  + q * TILESX * (TILESYA >> 2),
-						cpu_num_texture_tiles[q] * sizeof(float), // change to cpu_num_texture_tiles when ready
-						cudaMemcpyDeviceToHost));
-    		}
-    		for (int q = 0; q < 4; q++) {
-        		printf("%d: %3x:%3x %3x:%3x %3x:%3x %3x:%3x %3x:%3x %3x:%3x %3x:%3x %3x:%3x \n",q,
-        				(texture_indices[q * TILESX * (TILESYA >> 2) + 0] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 0] >> 8) % TILESX,
-        				(texture_indices[q * TILESX * (TILESYA >> 2) + 1] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 1] >> 8) % TILESX,
-        				(texture_indices[q * TILESX * (TILESYA >> 2) + 2] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 2] >> 8) % TILESX,
-        				(texture_indices[q * TILESX * (TILESYA >> 2) + 3] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 3] >> 8) % TILESX,
-        				(texture_indices[q * TILESX * (TILESYA >> 2) + 4] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 4] >> 8) % TILESX,
-        				(texture_indices[q * TILESX * (TILESYA >> 2) + 5] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 5] >> 8) % TILESX,
-        				(texture_indices[q * TILESX * (TILESYA >> 2) + 6] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 6] >> 8) % TILESX,
-        				(texture_indices[q * TILESX * (TILESYA >> 2) + 7] >> 8) / TILESX, (texture_indices[q * TILESX * (TILESYA >> 2) + 7] >> 8) % TILESX);
-    		}
-#endif //GEN_TEXTURE_LIST
 
 
 
@@ -1278,19 +1135,11 @@ int main(int argc, char **argv)
 	            texture_colors,        // int               colors,             // number of colors (3/1)
 	            (texture_colors == 1), // int               is_lwir,            // do not perform shot correction
 				gpu_generate_RBGA_params,
-/*
-	            10.0,                  // float             min_shot,           // 10.0
-	            3.0,                   // float             scale_shot,         // 3.0
-	            1.5f,                  // float             diff_sigma,         // pixel value/pixel change
-	            10.0f,                 // float             diff_threshold,     // pixel value/pixel change
-	            3.0,                   // float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
-*/
 				gpu_color_weights,     // float             weights[3],         // scale for R
 	            1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
 	            0,                     // int               keep_weights,       // return channel weights after A in RGBA
 				dstride_textures_rbga/sizeof(float), // 	const size_t      texture_rbga_stride,     // in floats
 				gpu_textures_rbga);     // 	float           * gpu_texture_tiles)    // (number of colors +1 + ?)*16*16 rgba texture tiles
-//				(float *) 0 ); // gpu_diff_rgb_combo);   // float           * gpu_diff_rgb_combo) // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS]
 
     	getLastCudaError("Kernel failure");
     	checkCudaErrors(cudaDeviceSynchronize());

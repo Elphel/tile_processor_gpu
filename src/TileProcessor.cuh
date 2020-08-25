@@ -815,7 +815,7 @@ __device__ void tile_combine_rgba(
 		//		boolean       diff_gauss,     // when averaging images, use gaussian around average as weight (false - sharp all/nothing)
 		float   min_agree,      // minimal number of channels to agree on a point (real number to work with fuzzy averages)
 		float * chn_weights,     // color channel weights, sum == 1.0
-		int     dust_remove,     // Do not reduce average weight when only one image differes much from the average
+		int     dust_remove,     // Do not reduce average weight when only one image differs much from the average
 		int     keep_weights,   // eturn channel weights and rms after A in RGBA (weight are always calculated, not so for the crms)
 		int     debug);
 
@@ -1003,7 +1003,8 @@ extern "C" __global__ void correlate2D(
 
 /**
  * Calculate  2D phase correlation pairs from CLT representation. This is an inner kernel that is called
- * from correlate2D. If called from the CPU: <<<ceil(number_of_tiles/32),32>>>
+ * from correlate2D. If called from the CPU: <<<ceil(number_of_tiles/32),32>>>.
+ * If corr_radius==0, skip normalization and inverse transform, output transform domain tiles
  *
  * @param gpu_clt          array of NUM_CAMS pointers to the CLT (frequency domain) data [TILES-Y][TILES-X][NUM_COLORS][DTT_SIZE*DTT_SIZE]
  * @param colors           number of colors used:  3 for RGB or 1 for monochrome
@@ -1014,7 +1015,7 @@ extern "C" __global__ void correlate2D(
  * @param num_corr_tiles   number of correlation tiles to process
  * @param gpu_corr_indices packed array (each element, integer contains tile+pair) of correlation tasks
  * @param corr_stride,     stride (in floats) for correlation outputs.
- * @param corr_radius,     radius of the output correlation (maximal 7 for 15x15)
+ * @param corr_radius,     radius of the output correlation (maximal 7 for 15x15). If 0 - output Transform Domain tiles, no normalization
  * @param gpu_corrs)       allocated array for the correlation output data (each element stride, payload: (2*corr_radius+1)^2
  */
 extern "C" __global__ void correlate2D_inner(
@@ -1028,7 +1029,7 @@ extern "C" __global__ void correlate2D_inner(
 		int             * gpu_corr_indices,   // packed tile+pair
 		const size_t      corr_stride,        // in floats
 		int               corr_radius,        // radius of the output correlation (7 for 15x15)
-		float           * gpu_corrs)          // correlation output data
+		float           * gpu_corrs)          // correlation output data (either pixel domain or transform domain
 {
 	float scales[3] = {scale0, scale1, scale2};
 	int corr_in_block = threadIdx.y;
@@ -1136,109 +1137,129 @@ extern "C" __global__ void correlate2D_inner(
 #endif
         } // if (color == 1){ // LPF only after B (nothing in mono)
     } // for (int color = 0; color < colors; color++){
-    normalizeTileAmplitude(
-    		clt_corr, // float * clt_tile, //       [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports
-			fat_zero); // float fat_zero ) // fat zero is absolute, scale it outside
-// Low Pass Filter from constant area (is it possible to replace?)
+
+    // Skip normalization, lpf, inverse correction and unfolding if Transform Domain output is required
+    if (corr_radius > 0) {
+    	normalizeTileAmplitude(
+    			clt_corr, // float * clt_tile, //       [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports
+				fat_zero); // float fat_zero ) // fat zero is absolute, scale it outside
+    	// Low Pass Filter from constant area (is it possible to replace?)
 
 #ifdef DBG_TILE
 #ifdef DEBUG6
-    if ((tile_num == DBG_TILE) && (corr_pair == 0) && (threadIdx.x == 0)){
-        printf("\ncorrelate2D CORRELATION NORMALIZED, fat_zero=%f\n",fat_zero);
-    	debug_print_clt1(clt_corr, -1,  0xf);
-    }
-     __syncthreads();// __syncwarp();
-#endif
-#endif
-
-
-#ifdef DBG_TILE
-#ifdef DEBUG6
-    if ((tile_num == DBG_TILE) && (corr_pair == 0) && (threadIdx.x == 0)){
-        printf("\ncorrelate2D LPF\n");
-        debug_print_lpf(lpf_corr);
-    }
-     __syncthreads();// __syncwarp();
-#endif
-#endif
-
-
-
-    float *clt = clt_corr + threadIdx.x;
-#pragma unroll
-    for (int q = 0; q < 4; q++){
-		float *lpf = lpf_corr + threadIdx.x;
-#pragma unroll
-    	for (int i = 0; i < DTT_SIZE; i++){
-    		(*clt) *= (*lpf);
-    		clt   += DTT_SIZE1;
-    		lpf   += DTT_SIZE;
+    	if ((tile_num == DBG_TILE) && (corr_pair == 0) && (threadIdx.x == 0)){
+    		printf("\ncorrelate2D CORRELATION NORMALIZED, fat_zero=%f\n",fat_zero);
+    		debug_print_clt1(clt_corr, -1,  0xf);
     	}
-    }
-    __syncthreads();// __syncwarp();
-#ifdef DBG_TILE
-#ifdef DEBUG6
-    if ((tile_num == DBG_TILE) && (corr_pair == 0) && (threadIdx.x == 0)){
-        printf("\ncorrelate2D CORRELATION LPF-ed\n");
-    	debug_print_clt1(clt_corr, -1,  0xf);
-    }
-     __syncthreads();// __syncwarp();
+    	__syncthreads();// __syncwarp();
 #endif
 #endif
-     dttii_2d(clt_corr);
 
 #ifdef DBG_TILE
 #ifdef DEBUG6
-    if ((tile_num == DBG_TILE) && (corr_pair == 0) && (threadIdx.x == 4)){
-        printf("\ncorrelate2D AFTER HOSIZONTAL (VERTICAL) PASS, corr_radius=%d\n",corr_radius);
-    	debug_print_clt1(clt_corr, -1,  0xf);
-    }
-     __syncthreads();// __syncwarp();
-
+    	if ((tile_num == DBG_TILE) && (corr_pair == 0) && (threadIdx.x == 0)){
+    		printf("\ncorrelate2D LPF\n");
+    		debug_print_lpf(lpf_corr);
+    	}
+    	__syncthreads();// __syncwarp();
 #endif
 #endif
 
-     corrUnfoldTile(
-    		 corr_radius, // int corr_radius,
-			 (float *) clt_corr,  // float* qdata0, //    [4][DTT_SIZE][DTT_SIZE1], // 4 quadrants of the clt data, rows extended to optimize shared ports
-			 (float *) mclt_corr); // float* rslt)  //   [DTT_SIZE2M1][DTT_SIZE2M1]) // 15x15
 
-     __syncthreads();
 
-#ifdef DBG_TILE
-#ifdef DEBUG6
-    if ((tile_num == DBG_TILE) && (corr_pair == 0) && (threadIdx.x == 0)){
-        printf("\ncorrelate2D after UNFOLD, corr_radius=%d\n",corr_radius);
-    	debug_print_corr_15x15(
-    			corr_radius, // int     corr_radius,
-    			mclt_corr,
-				-1);
-    }
-     __syncthreads();// __syncwarp();
-#endif
-#endif
-
-    // copy 15x15 tile to main memory (2 * corr_radius +1) x (2 * corr_radius +1)
- 	int size2r1 = 2 * corr_radius + 1;
- 	int len2r1x2r1 = size2r1 * size2r1;
-    int corr_tile_offset =  + corr_stride * corr_num;
-    float *mem_corr = gpu_corrs + corr_tile_offset;
+    	float *clt = clt_corr + threadIdx.x;
 #pragma unroll
-//    for (int offs = threadIdx.x; offs < DTT_SIZE2M1*DTT_SIZE2M1; offs+=CORR_THREADS_PER_TILE){ // variable number of cycles per thread
-    for (int offs = threadIdx.x; offs < len2r1x2r1; offs+=CORR_THREADS_PER_TILE){ // variable number of cycles per thread
-    	mem_corr[offs] = mclt_corr[offs];
-    }
+    	for (int q = 0; q < 4; q++){
+    		float *lpf = lpf_corr + threadIdx.x;
+#pragma unroll
+    		for (int i = 0; i < DTT_SIZE; i++){
+    			(*clt) *= (*lpf);
+    			clt   += DTT_SIZE1;
+    			lpf   += DTT_SIZE;
+    		}
+    	}
+    	__syncthreads();// __syncwarp();
 
-    __syncthreads();
+
 #ifdef DBG_TILE
 #ifdef DEBUG6
-    if ((tile_num == DBG_TILE) && (corr_pair == 0) && (threadIdx.x == 0)){
-        printf("\ncorrelate2D after copy to main memory\n");
-//    	debug_print_clt1(clt_corr, -1,  0xf);
-    }
-     __syncthreads();// __syncwarp();
+    	if ((tile_num == DBG_TILE) && (corr_pair == 0) && (threadIdx.x == 0)){
+    		printf("\ncorrelate2D CORRELATION LPF-ed\n");
+    		debug_print_clt1(clt_corr, -1,  0xf);
+    	}
+    	__syncthreads();// __syncwarp();
 #endif
 #endif
+    	dttii_2d(clt_corr);
+
+#ifdef DBG_TILE
+#ifdef DEBUG6
+    	if ((tile_num == DBG_TILE) && (corr_pair == 0) && (threadIdx.x == 4)){
+    		printf("\ncorrelate2D AFTER HOSIZONTAL (VERTICAL) PASS, corr_radius=%d\n",corr_radius);
+    		debug_print_clt1(clt_corr, -1,  0xf);
+    	}
+    	__syncthreads();// __syncwarp();
+
+#endif
+#endif
+
+    	corrUnfoldTile(
+    			corr_radius, // int corr_radius,
+				(float *) clt_corr,  // float* qdata0, //    [4][DTT_SIZE][DTT_SIZE1], // 4 quadrants of the clt data, rows extended to optimize shared ports
+				(float *) mclt_corr); // float* rslt)  //   [DTT_SIZE2M1][DTT_SIZE2M1]) // 15x15
+
+    	__syncthreads();
+
+#ifdef DBG_TILE
+#ifdef DEBUG6
+    	if ((tile_num == DBG_TILE) && (corr_pair == 0) && (threadIdx.x == 0)){
+    		printf("\ncorrelate2D after UNFOLD, corr_radius=%d\n",corr_radius);
+    		debug_print_corr_15x15(
+    				corr_radius, // int     corr_radius,
+					mclt_corr,
+					-1);
+    	}
+    	__syncthreads();// __syncwarp();
+#endif
+#endif
+
+    	// copy 15x15 tile to main memory (2 * corr_radius +1) x (2 * corr_radius +1)
+    	int size2r1 = 2 * corr_radius + 1;
+    	int len2r1x2r1 = size2r1 * size2r1;
+    	int corr_tile_offset =  + corr_stride * corr_num;
+    	float *mem_corr = gpu_corrs + corr_tile_offset;
+#pragma unroll
+    	//    for (int offs = threadIdx.x; offs < DTT_SIZE2M1*DTT_SIZE2M1; offs+=CORR_THREADS_PER_TILE){ // variable number of cycles per thread
+    	for (int offs = threadIdx.x; offs < len2r1x2r1; offs+=CORR_THREADS_PER_TILE){ // variable number of cycles per thread
+    		mem_corr[offs] = mclt_corr[offs];
+    	}
+
+    	__syncthreads();
+#ifdef DBG_TILE
+#ifdef DEBUG6
+    	if ((tile_num == DBG_TILE) && (corr_pair == 0) && (threadIdx.x == 0)){
+    		printf("\ncorrelate2D after copy to main memory\n");
+    		//    	debug_print_clt1(clt_corr, -1,  0xf);
+    	}
+    	__syncthreads();// __syncwarp();
+#endif
+#endif
+    } else { //     if (corr_radius > 0) { transform domain output
+//    	int corr_tile_offset =  + corr_stride * corr_num;
+    	float *mem_corr = gpu_corrs + corr_stride * corr_num + threadIdx.x;
+    	float *clt = clt_corr + threadIdx.x;
+#pragma unroll
+    	for (int q = 0; q < 4; q++){
+#pragma unroll
+    		for (int i = 0; i < DTT_SIZE; i++){
+    			(*mem_corr) = (*clt);
+    			clt        += DTT_SIZE1;
+    			mem_corr   += DTT_SIZE;
+    		}
+    	}
+    	__syncthreads();// __syncwarp();
+    } //     if (corr_radius > 0) ... else
+
 }
 
 /**
@@ -1791,6 +1812,7 @@ __global__ void create_nonoverlap_list(
 /**
  * Helper kernel for correlate2D() - generates dense list of correlation tasks.
  * With the quad camera each tile may generate up to 6 pairs (int array elements)
+ * Tiles are not ordered, but the correlation pairs for each tile are
  *
  * @param gpu_tasks            array of per-tile tasks (struct tp_task)
  * @param num_tiles            number of tiles int gpu_tasks array prepared for processing
@@ -2072,7 +2094,7 @@ extern "C" __global__ void textures_nonoverlap(
 		 create_nonoverlap_list<<<blocks0,threads0>>>(
 				 gpu_tasks,           // struct tp_task   * gpu_tasks,
 				 num_tiles,           // int                num_tiles,           // number of tiles in task
-				 num_tilesx,          // int                width,                // number of tiles in a row
+				 num_tilesx,          // int                width,               // number of tiles in a row
 				 gpu_texture_indices, // int *              nonoverlap_list,     // pointer to the calculated number of non-zero tiles
 				 pnum_texture_tiles); // int *              pnonoverlap_length)  //  indices to gpu_tasks  // should be initialized to zero
 		 cudaDeviceSynchronize();
@@ -2400,8 +2422,6 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 			debug );  // int     debug );
 
 	__syncthreads(); // _syncthreads();1
-
-
 
 // return either only 4 slices (RBGA) or all 12 (with weights and rms) if keep_weights
 // float rgbaw              [NUM_COLORS + 1 + NUM_CAMS + NUM_COLORS + 1][DTT_SIZE2][DTT_SIZE21];
@@ -3805,7 +3825,7 @@ __device__ void tile_combine_rgba(
 		float * port_offsets,  // [port]{x_off, y_off} - just to scale pixel value differences
 		//		int           port_mask,      // which port to use, 0xf - all 4 (will modify as local variable)
 		float   diff_sigma,    // pixel value/pixel change
-		float   diff_threshold,// pixel value/pixel change
+		float   diff_threshold,// pixel value/pixel change - never used
 		// next not used
 		//		boolean       diff_gauss,     // when averaging images, use gaussian around average as weight (false - sharp all/nothing)
 		float   min_agree,     // minimal number of channels to agree on a point (real number to work with fuzzy averages)
@@ -3817,7 +3837,7 @@ __device__ void tile_combine_rgba(
 	float * alpha =        rgba + (colors * (DTT_SIZE2*DTT_SIZE21));
 	float * port_weights = alpha + (DTT_SIZE2*DTT_SIZE21);
 	float * crms =         port_weights + NUM_CAMS*(DTT_SIZE2*DTT_SIZE21); // calculated only if keep_weights
-	float  threshold2 = diff_sigma * diff_threshold;
+	float  threshold2 = diff_sigma * diff_threshold; // never used?
 	threshold2 *= threshold2; // squared to compare with diff^2
 	float  pair_dist2r [NUM_CAMS*(NUM_CAMS-1)/2]; // new double [ports*(ports-1)/2]; // reversed squared distance between images - to be used with gaussian. Can be calculated once !
 	int    pair_ports[NUM_CAMS*(NUM_CAMS-1)/2][2];  // int [][]  pair_ports = new int [ports*(ports-1)/2][2];
