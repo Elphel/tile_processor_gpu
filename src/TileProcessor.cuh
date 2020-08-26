@@ -910,6 +910,15 @@ extern "C" __global__ void correlate2D_inner(
 		int               corr_radius,        // radius of the output correlation (7 for 15x15)
 		float           * gpu_corrs);          // correlation output data
 
+extern "C" __global__ void corr2D_normalize_inner(
+		int               num_corr_tiles,     // number of correlation tiles to process
+		const size_t      corr_stride_td,     // (in floats) stride for the input TD correlations
+		float           * gpu_corrs_td,       // correlation tiles in transform domain
+		const size_t      corr_stride,        // in floats
+		float           * gpu_corrs,          // correlation output data (either pixel domain or transform domain
+		float             fat_zero,           // here - absolute
+		int               corr_radius);        // radius of the output correlation (7 for 15x15)
+
 extern "C" __global__ void textures_accumulate(
 		int             * woi,                // x, y, width,height
 		float          ** gpu_clt,            // [NUM_CAMS] ->[TILES-Y][TILES-X][NUM_COLORS][DTT_SIZE*DTT_SIZE]
@@ -1033,7 +1042,7 @@ extern "C" __global__ void correlate2D_inner(
 {
 	float scales[3] = {scale0, scale1, scale2};
 	int corr_in_block = threadIdx.y;
-	int corr_num = blockIdx.x * CORR_TILES_PER_BLOCK + corr_in_block;
+	int corr_num = blockIdx.x * CORR_TILES_PER_BLOCK + corr_in_block; // 4
 	if (corr_num >= num_corr_tiles){
 		return; // nothing to do
 	}
@@ -1245,22 +1254,207 @@ extern "C" __global__ void correlate2D_inner(
 #endif
 #endif
     } else { //     if (corr_radius > 0) { transform domain output
-//    	int corr_tile_offset =  + corr_stride * corr_num;
+    	//    	int corr_tile_offset =  + corr_stride * corr_num;
     	float *mem_corr = gpu_corrs + corr_stride * corr_num + threadIdx.x;
     	float *clt = clt_corr + threadIdx.x;
 #pragma unroll
-    	for (int q = 0; q < 4; q++){
-#pragma unroll
-    		for (int i = 0; i < DTT_SIZE; i++){
-    			(*mem_corr) = (*clt);
-    			clt        += DTT_SIZE1;
-    			mem_corr   += DTT_SIZE;
-    		}
+    	for (int i = 0; i < DTT_SIZE4; i++){
+    		(*mem_corr) = (*clt);
+    		clt        += DTT_SIZE1;
+    		mem_corr   += DTT_SIZE;
     	}
     	__syncthreads();// __syncwarp();
     } //     if (corr_radius > 0) ... else
 
 }
+
+/**
+ * Normalize, low-pass filter, convert to pixel domain and unfold correlation tiles.This is an outer kernel
+ * that calls the inner one with CDP, this one should be configured as correlate2D<<<1,1>>>
+ *
+ * @param num_tiles        number of correlation tiles to process
+ * @param corr_stride_td,  stride (in floats) for correlation input (transform domain).
+ * @param gpu_corrs_td     correlation data in transform domain
+ * @param corr_stride,     stride (in floats) for correlation pixel-domain outputs.
+ * @param gpu_corrs        allocated array for the correlation output data (each element stride, payload: (2*corr_radius+1)^2
+ * @param fat_zero         add this value squared to the sum of squared components before normalization
+ * @param corr_radius,     radius of the output correlation (maximal 7 for 15x15)
+ */
+extern "C" __global__ void corr2D_normalize(
+		int               num_corr_tiles,     // number of correlation tiles to process
+		const size_t      corr_stride_td,     // in floats
+		float           * gpu_corrs_td,       // correlation tiles in transform domain
+		const size_t      corr_stride,        // in floats
+		float           * gpu_corrs,          // correlation output data (either pixel domain or transform domain
+		float             fat_zero,           // here - absolute
+		int               corr_radius)        // radius of the output correlation (7 for 15x15)
+{
+	 if (threadIdx.x == 0) { // only 1 thread, 1 block
+		    dim3 threads_corr(CORR_THREADS_PER_TILE, CORR_TILES_PER_BLOCK, 1);
+		    dim3 grid_corr((num_corr_tiles + CORR_TILES_PER_BLOCK_NORMALIZE-1) / CORR_TILES_PER_BLOCK_NORMALIZE,1,1);
+		    corr2D_normalize_inner<<<grid_corr,threads_corr>>>(
+	        		num_corr_tiles,      // int               num_corr_tiles,     // number of correlation tiles to process
+					corr_stride_td,      // const size_t      corr_stride,        // in floats
+					gpu_corrs_td,        // float           * gpu_corrs_td,       // correlation tiles in transform domain
+					corr_stride,         // const size_t      corr_stride,        // in floats
+					gpu_corrs,           // float           * gpu_corrs,          // correlation output data (either pixel domain or transform domain
+					fat_zero,            // float             fat_zero,           // here - absolute
+					corr_radius);        // int               corr_radius,        // radius of the output correlation (7 for 15x15)
+	 }
+}
+
+/**
+ * Normalize, low-pass filter, convert to pixel domain and unfold correlation tiles. This is an inner
+ * kernel that is called from corr2D_normalize.
+ *
+ * @param num_tiles        number of correlation tiles to process
+ * @param corr_stride_td,  stride (in floats) for correlation input (transform domain).
+ * @param gpu_corrs_td     correlation data in transform domain
+ * @param corr_stride,     stride (in floats) for correlation pixel-domain outputs.
+ * @param gpu_corrs        allocated array for the correlation output data (each element stride, payload: (2*corr_radius+1)^2
+ * @param fat_zero         add this value squared to the sum of squared components before normalization
+ * @param corr_radius,     radius of the output correlation (maximal 7 for 15x15)
+ */
+
+extern "C" __global__ void corr2D_normalize_inner(
+		int               num_corr_tiles,     // number of correlation tiles to process
+		const size_t      corr_stride_td,     // (in floats) stride for the input TD correlations
+		float           * gpu_corrs_td,       // correlation tiles in transform domain
+		const size_t      corr_stride,        // in floats
+		float           * gpu_corrs,          // correlation output data (either pixel domain or transform domain
+		float             fat_zero,           // here - absolute
+		int               corr_radius)        // radius of the output correlation (7 for 15x15)
+{
+	int corr_in_block = threadIdx.y;
+	int corr_num = blockIdx.x * CORR_TILES_PER_BLOCK_NORMALIZE + corr_in_block; // 4
+	if (corr_num >= num_corr_tiles){
+		return; // nothing to do
+	}
+    __syncthreads();// __syncwarp();
+    __shared__ float clt_corrs   [CORR_TILES_PER_BLOCK_NORMALIZE][4][DTT_SIZE][DTT_SIZE1];
+    __shared__ float mlt_corrs   [CORR_TILES_PER_BLOCK_NORMALIZE][DTT_SIZE2M1][DTT_SIZE2M1]; // result correlation
+    // set clt_corr to all zeros
+    float * clt_corr =  ((float *) clt_corrs) +  corr_in_block * (4 * DTT_SIZE * DTT_SIZE1); // top left quadrant0
+    float * mclt_corr = ((float *) mlt_corrs) +  corr_in_block * (DTT_SIZE2M1*DTT_SIZE2M1);
+
+    // Read correlation tile from the device memory to the shared memory
+	float *mem_corr = gpu_corrs_td + corr_stride_td * corr_num + threadIdx.x;
+	float *clt = clt_corr + threadIdx.x;
+#pragma unroll
+	for (int i = 0; i < DTT_SIZE4; i++){
+		(*clt)      = (*mem_corr);
+		clt        += DTT_SIZE1;
+		mem_corr   += DTT_SIZE;
+	}
+	__syncthreads();// __syncwarp();
+
+	// normalize Amplitude
+	normalizeTileAmplitude(
+			clt_corr, // float * clt_tile, //       [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports
+			fat_zero); // float fat_zero ) // fat zero is absolute, scale it outside
+	// Low Pass Filter from constant area (is it possible to replace?)
+
+#ifdef DBG_TILE
+#ifdef DEBUG6
+	if ((tile_num == DBG_TILE) && (corr_pair == 0) && (threadIdx.x == 0)){
+		printf("\ncorrelate2D CORRELATION NORMALIZED, fat_zero=%f\n",fat_zero);
+		debug_print_clt1(clt_corr, -1,  0xf);
+	}
+	__syncthreads();// __syncwarp();
+#endif
+#endif
+
+#ifdef DBG_TILE
+#ifdef DEBUG6
+	if ((tile_num == DBG_TILE) && (corr_pair == 0) && (threadIdx.x == 0)){
+		printf("\ncorrelate2D LPF\n");
+		debug_print_lpf(lpf_corr);
+	}
+	__syncthreads();// __syncwarp();
+#endif
+#endif
+
+	// Apply LPF filter
+	clt = clt_corr + threadIdx.x;
+#pragma unroll
+	for (int q = 0; q < 4; q++){
+		float *lpf = lpf_corr + threadIdx.x;
+#pragma unroll
+		for (int i = 0; i < DTT_SIZE; i++){
+			(*clt) *= (*lpf);
+			clt   += DTT_SIZE1;
+			lpf   += DTT_SIZE;
+		}
+	}
+	__syncthreads();// __syncwarp();
+#ifdef DBG_TILE
+#ifdef DEBUG6
+	if ((tile_num == DBG_TILE) && (corr_pair == 0) && (threadIdx.x == 0)){
+		printf("\ncorrelate2D CORRELATION LPF-ed\n");
+		debug_print_clt1(clt_corr, -1,  0xf);
+	}
+	__syncthreads();// __syncwarp();
+#endif
+#endif
+
+	// Convert correlation to pixel domain with DTT-II
+	dttii_2d(clt_corr);
+#ifdef DBG_TILE
+#ifdef DEBUG6
+	if ((tile_num == DBG_TILE) && (corr_pair == 0) && (threadIdx.x == 4)){
+		printf("\ncorrelate2D AFTER HOSIZONTAL (VERTICAL) PASS, corr_radius=%d\n",corr_radius);
+		debug_print_clt1(clt_corr, -1,  0xf);
+	}
+	__syncthreads();// __syncwarp();
+
+#endif
+#endif
+
+	// Unfold center area (2 * corr_radius + 1) * (2 * corr_radius + 1)
+	corrUnfoldTile(
+			corr_radius, // int corr_radius,
+			(float *) clt_corr,   // float* qdata0, //    [4][DTT_SIZE][DTT_SIZE1], // 4 quadrants of the clt data, rows extended to optimize shared ports
+			(float *) mclt_corr); // float* rslt)  //   [DTT_SIZE2M1][DTT_SIZE2M1]) // 15x15
+
+	__syncthreads();
+
+#ifdef DBG_TILE
+#ifdef DEBUG6
+	if ((tile_num == DBG_TILE) && (corr_pair == 0) && (threadIdx.x == 0)){
+		printf("\ncorrelate2D after UNFOLD, corr_radius=%d\n",corr_radius);
+		debug_print_corr_15x15(
+				corr_radius, // int     corr_radius,
+				mclt_corr,
+				-1);
+	}
+	__syncthreads();// __syncwarp();
+#endif
+#endif
+
+	// copy (2 * corr_radius +1) x (2 * corr_radius +1) (up to 15x15) tile to the main memory
+	int size2r1 = 2 * corr_radius + 1;
+	int len2r1x2r1 = size2r1 * size2r1;
+	int corr_tile_offset =  + corr_stride * corr_num;
+	mem_corr = gpu_corrs + corr_tile_offset;
+#pragma unroll
+	for (int offs = threadIdx.x; offs < len2r1x2r1; offs+=CORR_THREADS_PER_TILE){ // variable number of cycles per thread
+		mem_corr[offs] = mclt_corr[offs];
+	}
+	__syncthreads();
+#ifdef DBG_TILE
+#ifdef DEBUG6
+	if ((tile_num == DBG_TILE) && (corr_pair == 0) && (threadIdx.x == 0)){
+		printf("\ncorrelate2D after copy to main memory\n");
+		//    	debug_print_clt1(clt_corr, -1,  0xf);
+	}
+	__syncthreads();// __syncwarp();
+#endif
+#endif
+
+
+
+}
+
 
 /**
  * Calculate texture as RGBA (or YA for mono) from the in-memory frequency domain representation

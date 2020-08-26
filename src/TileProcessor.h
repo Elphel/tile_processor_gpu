@@ -77,6 +77,14 @@ extern "C" __global__ void correlate2D(
 		int               corr_radius,        // radius of the output correlation (7 for 15x15)
 		float           * gpu_corrs);          // correlation output data
 
+extern "C" __global__ void corr2D_normalize(
+		int               num_corr_tiles,     // number of correlation tiles to process
+		const size_t      corr_stride_td,     // in floats
+		float           * gpu_corrs_td,       // correlation tiles in transform domain
+		const size_t      corr_stride,        // in floats
+		float           * gpu_corrs,          // correlation output data (either pixel domain or transform domain
+		float             fat_zero,           // here - absolute
+		int               corr_radius);        // radius of the output correlation (7 for 15x15)
 
 extern "C" __global__ void textures_nonoverlap(
 		struct tp_task  * gpu_tasks,

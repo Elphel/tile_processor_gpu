@@ -40,42 +40,43 @@
 #pragma once
 #ifndef JCUDA
 #include <stdio.h>
-#define THREADSX         (DTT_SIZE)
-#define NUM_CAMS                  4
-#define NUM_PAIRS                 6
-#define NUM_COLORS                3
-#define IMG_WIDTH              2592
-#define IMG_HEIGHT             1936
-#define KERNELS_HOR             164
-#define KERNELS_VERT            123
-#define KERNELS_LSTEP             4
-#define THREADS_PER_TILE          8
-#define TILES_PER_BLOCK           4
-#define CORR_THREADS_PER_TILE     8
-#define CORR_TILES_PER_BLOCK      4
-#define TEXTURE_THREADS_PER_TILE  8
-#define TEXTURE_TILES_PER_BLOCK   1
-#define IMCLT_THREADS_PER_TILE   16
-#define IMCLT_TILES_PER_BLOCK     4
-#define CORR_NTILE_SHIFT          8 // higher bits - number of a pair, other bits tile number
-#define CORR_PAIRS_MASK        0x3f// lower bits used to address correlation pair for the selected tile
-#define CORR_TEXTURE_BIT          7 // bit 7 used to request texture for the tile
-#define TASK_CORR_BITS            4
-#define TASK_TEXTURE_N_BIT        0 // Texture with North neighbor
-#define TASK_TEXTURE_E_BIT        1 // Texture with East  neighbor
-#define TASK_TEXTURE_S_BIT        2 // Texture with South neighbor
-#define TASK_TEXTURE_W_BIT        3 // Texture with West  neighbor
-#define TASK_TEXTURE_BIT          3 // bit to request texture calculation int task field of struct tp_task
-#define LIST_TEXTURE_BIT          7 // bit to request texture calculation
-#define CORR_OUT_RAD              4
-#define FAT_ZERO_WEIGHT           0.0001 // add to port weights to avoid nan
+#define THREADSX              (DTT_SIZE)
+#define NUM_CAMS                       4
+#define NUM_PAIRS                      6
+#define NUM_COLORS                     3
+#define IMG_WIDTH                   2592
+#define IMG_HEIGHT                  1936
+#define KERNELS_HOR                  164
+#define KERNELS_VERT                 123
+#define KERNELS_LSTEP                  4
+#define THREADS_PER_TILE               8
+#define TILES_PER_BLOCK                4
+#define CORR_THREADS_PER_TILE          8
+#define CORR_TILES_PER_BLOCK           4
+#define CORR_TILES_PER_BLOCK_NORMALIZE 4
+#define TEXTURE_THREADS_PER_TILE       8
+#define TEXTURE_TILES_PER_BLOCK        1
+#define IMCLT_THREADS_PER_TILE        16
+#define IMCLT_TILES_PER_BLOCK          4
+#define CORR_NTILE_SHIFT               8 // higher bits - number of a pair, other bits tile number
+#define CORR_PAIRS_MASK             0x3f// lower bits used to address correlation pair for the selected tile
+#define CORR_TEXTURE_BIT               7 // bit 7 used to request texture for the tile
+#define TASK_CORR_BITS                 4
+#define TASK_TEXTURE_N_BIT             0 // Texture with North neighbor
+#define TASK_TEXTURE_E_BIT             1 // Texture with East  neighbor
+#define TASK_TEXTURE_S_BIT             2 // Texture with South neighbor
+#define TASK_TEXTURE_W_BIT             3 // Texture with West  neighbor
+#define TASK_TEXTURE_BIT               3 // bit to request texture calculation int task field of struct tp_task
+#define LIST_TEXTURE_BIT               7 // bit to request texture calculation
+#define CORR_OUT_RAD                   4
+#define FAT_ZERO_WEIGHT                0.0001 // add to port weights to avoid nan
 
-#define THREADS_DYNAMIC_BITS      5 // treads in block for CDP creation of the texture list
+#define THREADS_DYNAMIC_BITS           5 // treads in block for CDP creation of the texture list
 
-#define DBG_DISPARITY            0.0 // 56.0 // disparity for which to calculate offsets (not needed in Java)
-#define RBYRDIST_LEN           5001   // for doubles 10001 - floats   // length of rByRDist to allocate shared memory
-#define RBYRDIST_STEP             0.0004 // for doubles, 0.0002 - floats // to fit into GPU shared memory (was 0.001);
-#define TILES_PER_BLOCK_GEOM     (32/NUM_CAMS)   // each tile has NUM_CAMS threads
+#define DBG_DISPARITY                  0.0 // 56.0 // disparity for which to calculate offsets (not needed in Java)
+#define RBYRDIST_LEN                5001   // for doubles 10001 - floats   // length of rByRDist to allocate shared memory
+#define RBYRDIST_STEP                  0.0004 // for doubles, 0.0002 - floats // to fit into GPU shared memory (was 0.001);
+#define TILES_PER_BLOCK_GEOM          (32/NUM_CAMS)   // each tile has NUM_CAMS threads
 
 // only used in C++ test
 #define TILESX        (IMG_WIDTH / DTT_SIZE)
