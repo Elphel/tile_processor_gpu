@@ -919,6 +919,18 @@ extern "C" __global__ void corr2D_normalize_inner(
 		float             fat_zero,           // here - absolute
 		int               corr_radius);        // radius of the output correlation (7 for 15x15)
 
+extern "C" __global__ void corr2D_combine_inner(
+		int               num_tiles,          // number of tiles to process (each with num_pairs)
+		int               num_pairs,          // num pairs per tile (should be the same)
+		int               init_output,        // !=0 - reset output tiles to zero before accumulating
+		int               pairs_mask,         // selected pairs (0x3 - horizontal, 0xc - vertical, 0xf - quad, 0x30 - cross)
+		int             * gpu_corr_indices,   // packed tile+pair
+		int             * gpu_combo_indices,  // output if noty null: packed tile+pairs_mask (will point to the first used pair
+		const size_t      corr_stride,        // (in floats) stride for the input TD correlations
+		float           * gpu_corrs,          // input correlation tiles
+		const size_t      corr_stride_combo,  // (in floats) stride for the output TD correlations (same as input)
+		float           * gpu_corrs_combo);    // combined correlation output (one per tile)
+
 extern "C" __global__ void textures_accumulate(
 		int             * woi,                // x, y, width,height
 		float          ** gpu_clt,            // [NUM_CAMS] ->[TILES-Y][TILES-X][NUM_COLORS][DTT_SIZE*DTT_SIZE]
@@ -1269,6 +1281,194 @@ extern "C" __global__ void correlate2D_inner(
 }
 
 /**
+ * Combine multiple correlation pairs for quad (square) camera: 2 or 4 ortho into a single clt tile,
+ * and separately the two diagonals into another single one
+ * When adding vertical pairs to the horizontal, each quadrant is transposed, and the Q1 and Q2 are also swapped.
+ * when combining tho diagonals (down-right and up-right), the data in quadrants Q2 and Q3 is negated
+ * (corresponds to a vertical flip).
+ * Data can be added to the existing one (e.g. for the inter-scene accumulation of the compatible correlations).
+ * This is an outer kernel that calls the inner one with CDP, this one should be configured as corr2D_combine<<<1,1>>>
+ *
+ * @param num_tiles,          // number of tiles to process (each with num_pairs)
+ * @param num_pairs,          // num pairs per tile (should be the same)
+ * @param init_output,        // !=0 - reset output tiles to zero before accumulating
+ * @param pairs_mask,         // selected pairs (0x3 - horizontal, 0xc - vertical, 0xf - quad, 0x30 - cross)
+ * @param gpu_corr_indices,   // packed tile+pair
+ * @param gpu_combo_indices,  // output if noty null: packed tile+pairs_mask (will point to the first used pair
+ * @param corr_stride,        // (in floats) stride for the input TD correlations
+ * @param gpu_corrs,          // input correlation tiles
+ * @param corr_stride_combo,  // (in floats) stride for the output TD correlations (same as input)
+ * @param gpu_corrs_combo)    // combined correlation output (one per tile)
+ */
+extern "C" __global__ void corr2D_combine(
+		int               num_tiles,          // number of tiles to process (each with num_pairs)
+		int               num_pairs,          // num pairs per tile (should be the same)
+		int               init_output,        // !=0 - reset output tiles to zero before accumulating
+		int               pairs_mask,         // selected pairs (0x3 - horizontal, 0xc - vertical, 0xf - quad, 0x30 - cross)
+		int             * gpu_corr_indices,   // packed tile+pair
+		int             * gpu_combo_indices,  // output if noty null: packed tile+pairs_mask (will point to the first used pair
+		const size_t      corr_stride,        // (in floats) stride for the input TD correlations
+		float           * gpu_corrs,          // input correlation tiles
+		const size_t      corr_stride_combo,  // (in floats) stride for the output TD correlations (same as input)
+		float           * gpu_corrs_combo)    // combined correlation output (one per tile)
+{
+	 if (threadIdx.x == 0) { // only 1 thread, 1 block
+		    dim3 threads_corr(CORR_THREADS_PER_TILE, CORR_TILES_PER_BLOCK_COMBINE, 1);
+		    dim3 grid_corr((num_tiles + CORR_TILES_PER_BLOCK_COMBINE-1) / CORR_TILES_PER_BLOCK_COMBINE,1,1);
+		    corr2D_combine_inner<<<grid_corr,threads_corr>>>(
+		    		num_tiles,          // int               num_tiles,          // number of tiles to process (each with num_pairs)
+					num_pairs,          // int               num_pairs,          // num pairs per tile (should be the same)
+					init_output,        // int               init_output,        // !=0 - reset output tiles to zero before accumulating
+					pairs_mask,         // int               pairs_mask,         // selected pairs (0x3 - horizontal, 0xc - vertical, 0xf - quad, 0x30 - cross)
+					gpu_corr_indices,   // int             * gpu_corr_indices,   // packed tile+pair
+					gpu_combo_indices,  // int             * gpu_combo_indices,  // output if noty null: packed tile+pairs_mask (will point to the first used pair
+					corr_stride,        // const size_t      corr_stride,        // (in floats) stride for the input TD correlations
+					gpu_corrs,          // float           * gpu_corrs,          // input correlation tiles
+					corr_stride_combo,  // const size_t      corr_stride_combo,  // (in floats) stride for the output TD correlations (same as input)
+					gpu_corrs_combo);    // float           * gpu_corrs_combo)    // combined correlation output (one per tile)
+	 }
+
+}
+
+//#define CORR_TILES_PER_BLOCK_COMBINE   4 // increase to 8?
+#define PAIRS_HOR_DIAG_MAIN 0x13
+#define PAIRS_VERT          0x0c
+#define PAIRS_DIAG_OTHER    0x20
+/**
+ * Combine multiple correlation pairs for quad (square) camera: 2 or 4 ortho into a single clt tile,
+ * and separately the two diagonals into another single one
+ * When adding vertical pairs to the horizontal, each quadrant is transposed, and the Q1 and Q2 are also swapped.
+ * when combining tho diagonals (down-right and up-right), the data in quadrants Q2 and Q3 is negated
+ * (corresponds to a vertical flip).
+ * Data can be added to the existing one (e.g. for the inter-scene accumulation of the compatible correlations).
+ * This is an inner kernel that is called from corr2D_combine.
+ *
+ * @param num_tiles,          // number of tiles to process (each with num_pairs)
+ * @param num_pairs,          // num pairs per tile (should be the same)
+ * @param init_output,        // !=0 - reset output tiles to zero before accumulating
+ * @param pairs_mask,         // selected pairs (0x3 - horizontal, 0xc - vertical, 0xf - quad, 0x30 - cross)
+ * @param gpu_corr_indices,   // packed tile+pair
+ * @param gpu_combo_indices,  // output if noty null: packed tile+pairs_mask (will point to the first used pair
+ * @param corr_stride,        // (in floats) stride for the input TD correlations
+ * @param gpu_corrs,          // input correlation tiles
+ * @param corr_stride_combo,  // (in floats) stride for the output TD correlations (same as input)
+ * @param gpu_corrs_combo)    // combined correlation output (one per tile)
+ */
+extern "C" __global__ void corr2D_combine_inner(
+		int               num_tiles,          // number of tiles to process (each with num_pairs)
+		int               num_pairs,          // num pairs per tile (should be the same)
+		int               init_output,        // !=0 - reset output tiles to zero before accumulating
+		int               pairs_mask,         // selected pairs (0x3 - horizontal, 0xc - vertical, 0xf - quad, 0x30 - cross)
+		int             * gpu_corr_indices,   // packed tile+pair
+		int             * gpu_combo_indices,  // output if noty null: packed tile+pairs_mask (will point to the first used pair
+		const size_t      corr_stride,        // (in floats) stride for the input TD correlations
+		float           * gpu_corrs,          // input correlation tiles
+		const size_t      corr_stride_combo,  // (in floats) stride for the output TD correlations (same as input)
+		float           * gpu_corrs_combo)    // combined correlation output (one per tile)
+{
+	int tile_in_block = threadIdx.y;
+	int tile_index = blockIdx.x * CORR_TILES_PER_BLOCK_COMBINE + tile_in_block;
+	if (tile_index >= num_tiles){
+		return; // nothing to do
+	}
+	int corr_tile_index0 = tile_index * num_pairs;
+	if (gpu_combo_indices != 0){
+		int corr_pair = gpu_corr_indices[corr_tile_index0];
+		gpu_combo_indices[tile_index] = ((corr_pair >> CORR_NTILE_SHIFT) << CORR_NTILE_SHIFT) | pairs_mask;
+	}
+	float scale = 1.0/__popc(pairs_mask); // reverse to number of pairs to combine
+    __syncthreads();// __syncwarp();
+    __shared__ float clt_corrs   [CORR_TILES_PER_BLOCK_COMBINE][4][DTT_SIZE][DTT_SIZE1];
+    // start of the block in shared memory
+    float *clt_corr =  ((float *) clt_corrs) +  tile_in_block * (4 * DTT_SIZE * DTT_SIZE1); // top left quadrant0
+	float *clt = clt_corr + threadIdx.x;
+	float *mem_corr = gpu_corrs_combo + corr_stride_combo * tile_index + threadIdx.x;
+
+	if (init_output != 0){ // reset combo
+#pragma unroll
+		for (int i = 0; i < DTT_SIZE4; i++){
+			(*clt)         = 0.0f;
+			clt           += DTT_SIZE1;
+		}
+	} else { // read previous from device memory
+#pragma unroll
+		for (int i = 0; i < DTT_SIZE4; i++){
+			(*clt)      = (*mem_corr);
+			clt        += DTT_SIZE1;
+			mem_corr   += DTT_SIZE;
+		}
+	}
+	__syncthreads();// __syncwarp();
+
+
+	for (int ipair = 0; ipair < num_pairs; ipair++){ // only selected
+		int corr_tile_index = corr_tile_index0 + ipair;
+		// get number of pair
+		int corr_pair = gpu_corr_indices[corr_tile_index];
+//		int tile_num = corr_pair >> CORR_NTILE_SHIFT;
+		corr_pair &= (corr_pair & ((1 << CORR_NTILE_SHIFT) - 1));
+		int pair_bit = 1 << corr_pair;
+		if ((pairs_mask & pair_bit) != 0) {
+//			if (corr_pair > NUM_PAIRS){
+//				return; // BUG - should not happen
+//			}
+			if (PAIRS_HOR_DIAG_MAIN & pair_bit){ // just accumulate. This if-s will branch in all threads, no diversion
+				clt = clt_corr + threadIdx.x;
+				mem_corr = gpu_corrs + corr_stride_combo * corr_tile_index + threadIdx.x;
+#pragma unroll
+				for (int i = 0; i < DTT_SIZE4; i++){
+					(*clt)     += (*mem_corr);
+					clt        += DTT_SIZE1;
+					mem_corr   += DTT_SIZE;
+				}
+
+			} else if (PAIRS_VERT & pair_bit) { // transpose and swap Q1 and Q2
+				for (int q = 0; q < 4; q++){
+					int qr = ((q & 1) << 1) | ((q >> 1) & 1);
+					clt = clt_corr + qr * (DTT_SIZE1 * DTT_SIZE) + threadIdx.x;
+					mem_corr = gpu_corrs + corr_stride_combo * corr_tile_index + q * (DTT_SIZE * DTT_SIZE) + DTT_SIZE * threadIdx.x;
+#pragma unroll
+					for (int i = 0; i < DTT_SIZE; i++){
+						(*clt)     += (*mem_corr);
+						clt        += DTT_SIZE1;
+						mem_corr   += 1;
+					}
+				}
+
+			} else if (PAIRS_DIAG_OTHER & pair_bit) {
+				clt = clt_corr + threadIdx.x;
+				mem_corr = gpu_corrs + corr_stride_combo * corr_tile_index + threadIdx.x;
+#pragma unroll
+				for (int i = 0; i < DTT_SIZE2; i++){ // CC, CS
+					(*clt)     += (*mem_corr);
+					clt        += DTT_SIZE1;
+					mem_corr   += DTT_SIZE;
+				}
+#pragma unroll
+				for (int i = 0; i < DTT_SIZE2; i++){ // SC, SS
+					(*clt)     -= (*mem_corr); // negate
+					clt        += DTT_SIZE1;
+					mem_corr   += DTT_SIZE;
+				}
+
+			} //PAIRS_DIAG_OTHER
+		}
+	} //for (int ipair = 0; ipair < num_pairs; ipair++){ // only selected
+	__syncthreads();// __syncwarp();
+	// copy result to the device memory
+
+	clt = clt_corr + threadIdx.x;
+	mem_corr = gpu_corrs_combo + corr_stride_combo * tile_index + threadIdx.x;
+#pragma unroll
+	for (int i = 0; i < DTT_SIZE4; i++){
+		(*mem_corr) = (*clt);
+		clt        += DTT_SIZE1;
+		mem_corr   += DTT_SIZE;
+	}
+	__syncthreads();// __syncwarp();
+}
+
+/**
  * Normalize, low-pass filter, convert to pixel domain and unfold correlation tiles.This is an outer kernel
  * that calls the inner one with CDP, this one should be configured as correlate2D<<<1,1>>>
  *
@@ -1290,7 +1490,7 @@ extern "C" __global__ void corr2D_normalize(
 		int               corr_radius)        // radius of the output correlation (7 for 15x15)
 {
 	 if (threadIdx.x == 0) { // only 1 thread, 1 block
-		    dim3 threads_corr(CORR_THREADS_PER_TILE, CORR_TILES_PER_BLOCK, 1);
+		    dim3 threads_corr(CORR_THREADS_PER_TILE, CORR_TILES_PER_BLOCK_NORMALIZE, 1);
 		    dim3 grid_corr((num_corr_tiles + CORR_TILES_PER_BLOCK_NORMALIZE-1) / CORR_TILES_PER_BLOCK_NORMALIZE,1,1);
 		    corr2D_normalize_inner<<<grid_corr,threads_corr>>>(
 	        		num_corr_tiles,      // int               num_corr_tiles,     // number of correlation tiles to process

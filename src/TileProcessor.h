@@ -86,6 +86,18 @@ extern "C" __global__ void corr2D_normalize(
 		float             fat_zero,           // here - absolute
 		int               corr_radius);        // radius of the output correlation (7 for 15x15)
 
+extern "C" __global__ void corr2D_combine(
+		int               num_tiles,          // number of tiles to process (each with num_pairs)
+		int               num_pairs,          // num pairs per tile (should be the same)
+		int               init_output,        // !=0 - reset output tiles to zero before accumulating
+		int               pairs_mask,         // selected pairs (0x3 - horizontal, 0xc - vertical, 0xf - quad, 0x30 - cross)
+		int             * gpu_corr_indices,   // packed tile+pair
+		int             * gpu_combo_indices,  // output if noty null: packed tile+pairs_mask (will point to the first used pair
+		const size_t      corr_stride,        // (in floats) stride for the input TD correlations
+		float           * gpu_corrs,          // input correlation tiles
+		const size_t      corr_stride_combo,  // (in floats) stride for the output TD correlations (same as input)
+		float           * gpu_corrs_combo);   // combined correlation output (one per tile)
+
 extern "C" __global__ void textures_nonoverlap(
 		struct tp_task  * gpu_tasks,
 		int               num_tiles,          // number of tiles in task list

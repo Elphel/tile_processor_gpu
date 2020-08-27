@@ -53,7 +53,8 @@
 #define TILES_PER_BLOCK                4
 #define CORR_THREADS_PER_TILE          8
 #define CORR_TILES_PER_BLOCK           4
-#define CORR_TILES_PER_BLOCK_NORMALIZE 4
+#define CORR_TILES_PER_BLOCK_NORMALIZE 4 // increase to 8?
+#define CORR_TILES_PER_BLOCK_COMBINE   4 // increase to 16?
 #define TEXTURE_THREADS_PER_TILE       8
 #define TEXTURE_TILES_PER_BLOCK        1
 #define IMCLT_THREADS_PER_TILE        16
