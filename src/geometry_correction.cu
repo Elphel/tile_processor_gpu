@@ -363,7 +363,7 @@ extern "C" __global__ void get_tiles_offsets(
 			(extrinsic_corr.imu_move[1] != 0.0) ||
 			(extrinsic_corr.imu_move[2] != 0.0);
 // Temporary
-	imu_exists = 0;
+//	imu_exists = 0;
 #ifdef DEBUG21
 	if ((ncam == DBG_CAM)  && (task_num == DBG_TILE)){
 		printf("\nTile = %d, camera= %d\n", task_num, ncam);
@@ -660,7 +660,7 @@ extern "C" __global__ void get_tiles_offsets(
 				dpYci_dtilt * extrinsic_corr.imu_rot[0] +
 				dpYci_dazimuth * extrinsic_corr.imu_rot[1] +
 				dpYci_droll * extrinsic_corr.imu_rot[2]);
-#ifdef DEBUG210
+#ifdef DEBUG21
 		if ((ncam == DBG_CAM)  && (task_num == DBG_TILE)){
 			printf("delta_t = %f,  ers_Xci = %f,  ers_Yci = %f\n", delta_t, ers_Xci, ers_Yci);
 		}
@@ -683,7 +683,7 @@ extern "C" __global__ void get_tiles_offsets(
 			pXY[0] +=  ers_Xci * rD2rND; // added correction to pixel X
 			pXY[1] +=  ers_Yci * rD2rND; // added correction to pixel Y
 
-#ifdef DEBUG210
+#ifdef DEBUG21
 			if ((ncam == DBG_CAM)  && (task_num == DBG_TILE)){
 				printf("k = %f,  wdisparity = %f,  dwdisp_dz = %f\n", k, wdisparity, dwdisp_dz);
 				printf("dpXci_pYci_imu_lin[0][0] = %f,  dpXci_pYci_imu_lin[0][2] = %f\n", dpXci_pYci_imu_lin[0][0],dpXci_pYci_imu_lin[0][2]);
