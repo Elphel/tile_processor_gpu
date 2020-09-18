@@ -93,8 +93,8 @@
 
 //#define DBG_TILE_X     40
 //#define DBG_TILE_Y     80
-#define DBG_TILE_X     162 // 151 // 161 // 49
-#define DBG_TILE_Y     121 // 69  // 111 // 66
+#define DBG_TILE_X     32 // 162 // 151 // 161 // 49
+#define DBG_TILE_Y     88 // 121 // 69  // 111 // 66
 
 #define DBG_TILE    (DBG_TILE_Y * 324 + DBG_TILE_X)
 #undef DBG_MARK_DBG_TILE

@@ -739,7 +739,16 @@ int main(int argc, char **argv)
     		sdkResetTimer(&timerGEOM);
     		sdkStartTimer(&timerGEOM);
     	}
+/*
     	get_tiles_offsets<<<grid_geom,threads_geom>>> (
+    			gpu_tasks,               // struct tp_task     * gpu_tasks,
+				tp_task_size,            // int                  num_tiles,          // number of tiles in task list
+				gpu_geometry_correction, //	struct gc          * gpu_geometry_correction,
+				gpu_correction_vector,   //	struct corr_vector * gpu_correction_vector,
+				gpu_rByRDist,            //	float *              gpu_rByRDist)      // length should match RBYRDIST_LEN
+				gpu_rot_deriv);          // union trot_deriv   * gpu_rot_deriv);
+				*/
+    	calculate_tiles_offsets<<<1,1>>> (
     			gpu_tasks,               // struct tp_task     * gpu_tasks,
 				tp_task_size,            // int                  num_tiles,          // number of tiles in task list
 				gpu_geometry_correction, //	struct gc          * gpu_geometry_correction,
