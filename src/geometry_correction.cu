@@ -671,7 +671,8 @@ extern "C" __global__ void get_tiles_offsets(
 			dpXci_pYci_imu_lin[0][0] = -wdisparity / k; // dpx/ dworld_X
 			dpXci_pYci_imu_lin[1][1] =  wdisparity / k; // dpy/ dworld_Y
 			dpXci_pYci_imu_lin[0][2] =  (xyz[0] / k) * dwdisp_dz; // dpx/ dworld_Z
-			dpXci_pYci_imu_lin[1][2] =  (xyz[1] / k) * dwdisp_dz; // dpy/ dworld_Z
+////			dpXci_pYci_imu_lin[1][2] =  (xyz[1] / k) * dwdisp_dz; // dpy/ dworld_Z
+			dpXci_pYci_imu_lin[1][2] =  -(xyz[1] / k) * dwdisp_dz; // dpy/ dworld_Z
 			ers_x += dpXci_pYci_imu_lin[0][0] * extrinsic_corr.imu_move[0] +
 					dpXci_pYci_imu_lin[0][2] * extrinsic_corr.imu_move[2];
 			ers_y += dpXci_pYci_imu_lin[1][1] * extrinsic_corr.imu_move[1] +
