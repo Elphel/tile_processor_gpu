@@ -274,7 +274,7 @@ int main(int argc, char **argv)
 			"/home/eyesis/git/tile_processor_gpu/clt/main_chn2.portsxy",
 			"/home/eyesis/git/tile_processor_gpu/clt/main_chn3.portsxy"};
 
-#ifndef DBG_TILE
+//#ifndef DBG_TILE
     const char* ports_clt_file[] = { // never referenced
     		"/home/eyesis/git/tile_processor_gpu/clt/main_chn0.clt",
 			"/home/eyesis/git/tile_processor_gpu/clt/main_chn1.clt",
@@ -285,7 +285,7 @@ int main(int argc, char **argv)
 			"/home/eyesis/git/tile_processor_gpu/clt/main_chn1.rbg",
 			"/home/eyesis/git/tile_processor_gpu/clt/main_chn2.rbg",
 			"/home/eyesis/git/tile_processor_gpu/clt/main_chn3.rbg"};
-#endif
+//#endif
     const char* result_corr_file = "/home/eyesis/git/tile_processor_gpu/clt/main_corr.corr";
     const char* result_corr_quad_file =  "/home/eyesis/git/tile_processor_gpu/clt/main_corr-quad.corr";
     const char* result_corr_cross_file = "/home/eyesis/git/tile_processor_gpu/clt/main_corr-cross.corr";
@@ -519,7 +519,7 @@ int main(int argc, char **argv)
     // segfault in the next
     gpu_tasks = (struct tp_task  *) copyalloc_kernel_gpu((float * ) &task_data, tp_task_size * (sizeof(struct tp_task)/sizeof(float)));
 
-    // build corr_indices - not needed anympore?
+    // build corr_indices - not needed anymore?
     /*
     num_corrs = 0;
     for (int ty = 0; ty < TILESY; ty++){
@@ -940,13 +940,13 @@ int main(int argc, char **argv)
 				3* (IMG_HEIGHT + DTT_SIZE),
     			cudaMemcpyDeviceToHost));
 
-#ifndef DBG_TILE
+///#ifndef DBG_TILE
         printf("Writing RBG data to %s\n",  result_rbg_file[ncam]);
     	writeFloatsToFile( // will have margins
     			cpu_corr_image, // float *       data, // allocated array
 				rslt_img_size, // int           size, // length in elements
 				result_rbg_file[ncam]); // 			   const char *  path) // file path
-#endif
+///#endif
     }
 
     free(cpu_corr_image);

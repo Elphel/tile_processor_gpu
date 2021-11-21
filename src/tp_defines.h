@@ -99,7 +99,7 @@
 #define DBG_TILE    (DBG_TILE_Y * 324 + DBG_TILE_X)
 #undef DBG_MARK_DBG_TILE
 
-
+//#undef DBG_TILE
 
 //#undef HAS_PRINTF
 #define HAS_PRINTF

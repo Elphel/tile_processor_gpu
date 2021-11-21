@@ -1318,7 +1318,7 @@ extern "C" __global__ void correlate2D_inner(
  *
  * @param num_tiles,          // number of tiles to process (each with num_pairs)
  * @param num_pairs,          // num pairs per tile (should be the same)
- * @param init_output,        // !=0 - reset output tiles to zero before accumulating
+ * @param init_output,        // & 1 - reset output tiles to zero before accumulating, &2 no transpose
  * @param pairs_mask,         // selected pairs (0x3 - horizontal, 0xc - vertical, 0xf - quad, 0x30 - cross)
  * @param gpu_corr_indices,   // packed tile+pair
  * @param gpu_combo_indices,  // output if noty null: packed tile+pairs_mask (will point to the first used pair
@@ -1411,7 +1411,7 @@ extern "C" __global__ void corr2D_combine_inner(
 	float *clt = clt_corr + threadIdx.x;
 	float *mem_corr = gpu_corrs_combo + corr_stride_combo * tile_index + threadIdx.x;
 
-	if (init_output != 0){ // reset combo
+	if (init_output & 1){ // reset combo
 #pragma unroll
 		for (int i = 0; i < DTT_SIZE4; i++){
 			(*clt)         = 0.0f;
@@ -1439,7 +1439,7 @@ extern "C" __global__ void corr2D_combine_inner(
 //			if (corr_pair > NUM_PAIRS){
 //				return; // BUG - should not happen
 //			}
-			if (PAIRS_HOR_DIAG_MAIN & pair_bit){ // just accumulate. This if-s will branch in all threads, no diversion
+			if ((PAIRS_HOR_DIAG_MAIN & pair_bit) || (init_output & 2)){ // just accumulate. This if-s will branch in all threads, no diversion
 				clt = clt_corr + threadIdx.x;
 				mem_corr = gpu_corrs + corr_stride_combo * corr_tile_index + threadIdx.x;
 #pragma unroll
