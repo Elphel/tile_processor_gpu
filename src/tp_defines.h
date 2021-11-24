@@ -41,9 +41,10 @@
 #ifndef JCUDA
 #include <stdio.h>
 #define THREADSX              (DTT_SIZE)
-#define NUM_CAMS                       4
+#define TEST_LWIR                      1
+#define NUM_CAMS                      16 // now maximal number of cameras
 #define NUM_PAIRS                      6
-#define NUM_COLORS                     3
+#define NUM_COLORS                     1 //3
 #define IMG_WIDTH                   2592
 #define IMG_HEIGHT                  1936
 #define KERNELS_HOR                  164
@@ -55,11 +56,13 @@
 #define CORR_TILES_PER_BLOCK           4
 #define CORR_TILES_PER_BLOCK_NORMALIZE 4 // increase to 8?
 #define CORR_TILES_PER_BLOCK_COMBINE   4 // increase to 16?
+#define TEXTURE_THREADS               32 //
 #define TEXTURE_THREADS_PER_TILE       8
 #define TEXTURE_TILES_PER_BLOCK        1
 #define IMCLT_THREADS_PER_TILE        16
 #define IMCLT_TILES_PER_BLOCK          4
 #define CORR_NTILE_SHIFT               8 // higher bits - number of a pair, other bits tile number
+// only lower bit will be used to request correlations, correlation mask will be common for all the scene
 #define CORR_PAIRS_MASK             0x3f// lower bits used to address correlation pair for the selected tile
 #define CORR_TEXTURE_BIT               7 // bit 7 used to request texture for the tile
 #define TASK_CORR_BITS                 4
