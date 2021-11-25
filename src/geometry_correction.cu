@@ -156,15 +156,16 @@ extern "C" __global__ void calc_rot_deriv(
 	float zoom;
 	int ncam =    blockIdx.x; // threadIdx.z;
 	int nangle1 = threadIdx.x + threadIdx.y * blockDim.x; // * >> 1;
-	int nangle =  nangle1 >> 1;
+	int nangle =  nangle1 >> 1; // 0: az, 1: tilt, 2: roll, 3:roll
 	int is_sin = nangle1 & 1;
 	if ((threadIdx.z == 0) && (nangle < 4)){ // others just idle here
 		float * gangles = (float *) gpu_correction_vector + angles_offsets[nangle]; // pointer for channel 0
-		if (ncam == (NUM_CAMS-1)){ // for the whole block
+///		if (ncam == (NUM_CAMS-1)){ // for the whole block
+		if (ncam == (num_cams-1)){ // for the whole block
 			angle = 0.0;
 			zoom = 0.0;
-#pragma	unroll
-			for (int n = 0; n < (NUM_CAMS-1); n++){
+///			for (int n = 0; n < (NUM_CAMS-1); n++){
+			for (int n = 0; n < (num_cams-1); n++){
 				angle -= *(gangles + n);
 				zoom -= gpu_correction_vector->zoom[n];
 			}
