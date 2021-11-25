@@ -104,8 +104,9 @@ extern "C" __global__ void corr2D_combine(
 		float           * gpu_corrs_combo);   // combined correlation output (one per tile)
 
 extern "C" __global__ void textures_nonoverlap(
-		int                num_cams,           // number of cameras used
-		struct tp_task  * gpu_tasks,
+		int               num_cams,           // number of cameras
+		float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats
+		//		struct tp_task  * gpu_tasks,
 		int               num_tiles,          // number of tiles in task list
 //		int               num_tilesx,         // number of tiles in a row
 // declare arrays in device code?
@@ -151,7 +152,8 @@ extern "C" __global__ void imclt_rbg(
 extern "C" __global__ void generate_RBGA(
 		int                num_cams,           // number of cameras used
 		// Parameters to generate texture tasks
-		struct tp_task   * gpu_tasks,
+		float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
+//		struct tp_task   * gpu_tasks,
 		int                num_tiles,          // number of tiles in task list
 		// declare arrays in device code?
 		int              * gpu_texture_indices,// packed tile + bits (now only (1 << 7)

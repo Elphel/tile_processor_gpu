@@ -44,16 +44,18 @@
 
 // Using NUM_CAMS threads per tile
 #define THREADS_PER_BLOCK_GEOM (TILES_PER_BLOCK_GEOM * NUM_CAMS)
-#define CYCLES_COPY_GC   ((sizeof(struct gc)/sizeof(float) + THREADS_PER_BLOCK_GEOM - 1) / THREADS_PER_BLOCK_GEOM)
-#define CYCLES_COPY_CV   ((sizeof(struct corr_vector)/sizeof(float) + THREADS_PER_BLOCK_GEOM - 1) / THREADS_PER_BLOCK_GEOM)
-#define CYCLES_COPY_RBRD ((RBYRDIST_LEN + THREADS_PER_BLOCK_GEOM - 1) / THREADS_PER_BLOCK_GEOM)
+///#define CYCLES_COPY_GC   ((sizeof(struct gc)/sizeof(float) + THREADS_PER_BLOCK_GEOM - 1) / THREADS_PER_BLOCK_GEOM)
+///#define CYCLES_COPY_CV   ((sizeof(struct corr_vector)/sizeof(float) + THREADS_PER_BLOCK_GEOM - 1) / THREADS_PER_BLOCK_GEOM)
+///#define CYCLES_COPY_RBRD ((RBYRDIST_LEN + THREADS_PER_BLOCK_GEOM - 1) / THREADS_PER_BLOCK_GEOM)
 //#define CYCLES_COPY_ROTS ((NUM_CAMS * 3 *3 + THREADS_PER_BLOCK_GEOM - 1) / THREADS_PER_BLOCK_GEOM)
-#define CYCLES_COPY_ROTS (((sizeof(trot_deriv)/sizeof(float)) + THREADS_PER_BLOCK_GEOM - 1) / THREADS_PER_BLOCK_GEOM)
+//#define CYCLES_COPY_ROTS (((sizeof(trot_deriv)/sizeof(float)) + THREADS_PER_BLOCK_GEOM - 1) / THREADS_PER_BLOCK_GEOM)
 
 #define DBG_CAM 3
 
 __device__ void printGeometryCorrection(struct gc * g);
 __device__ void printExtrinsicCorrection(corr_vector * cv);
+
+
 /**
  * Calculate non-distorted radius from distorted using table approximation
  * @param rDist distorted radius
@@ -123,11 +125,28 @@ __constant__ int offset_derivs =   1;                   // 1..4 // should be nex
 __constant__ int offset_matrices = 5;   // 5..11
 __constant__ int offset_tmp =      12; // 12..15
 
+//inline __device__ int get_task_size_gc(int num_cams);
+inline __device__ int get_task_task_gc(int num_tile, float * gpu_ftasks, int num_cams);
+inline __device__ int get_task_txy_gc(int num_tile, float * gpu_ftasks, int num_cams);
+
+//inline __device__ int get_task_size_gc(int num_cams){
+//	return sizeof(struct tp_task)/sizeof(float) - 6 * (NUM_CAMS - num_cams);
+//}
+
+inline __device__ int get_task_task_gc(int num_tile, float * gpu_ftasks, int num_cams) {
+	return *(int *) (gpu_ftasks +  get_task_size(num_cams) * num_tile);
+}
+inline __device__ int get_task_txy_gc(int num_tile, float * gpu_ftasks, int num_cams) {
+	return *(int *) (gpu_ftasks +  get_task_size(num_cams) * num_tile + 1);
+}
+
+
 /**
  * Calculate rotation matrices and derivatives by az, tilt, roll, zoom
  * NUM_CAMS blocks of 3,3,3 tiles
  */
 extern "C" __global__ void calc_rot_deriv(
+		int                  num_cams,
 		struct corr_vector * gpu_correction_vector,
 		trot_deriv   * gpu_rot_deriv)
 {
@@ -282,18 +301,27 @@ extern "C" __global__ void calc_rot_deriv(
 
 
 extern "C" __global__ void calculate_tiles_offsets(
-		struct tp_task     * gpu_tasks,
+		int                  num_cams,
+		float              * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
+//		struct tp_task     * gpu_tasks,
 		int                  num_tiles,          // number of tiles in task
 		struct gc          * gpu_geometry_correction,
 		struct corr_vector * gpu_correction_vector,
 		float *              gpu_rByRDist, // length should match RBYRDIST_LEN
 		trot_deriv   * gpu_rot_deriv)
 {
-	dim3 threads_geom(NUM_CAMS,TILES_PER_BLOCK_GEOM, 1);
-	dim3 grid_geom   ((num_tiles+TILES_PER_BLOCK_GEOM-1)/TILES_PER_BLOCK_GEOM, 1, 1);
+///	dim3 threads_geom(NUM_CAMS,TILES_PER_BLOCK_GEOM, 1);
+///	dim3 grid_geom   ((num_tiles+TILES_PER_BLOCK_GEOM-1)/TILES_PER_BLOCK_GEOM, 1, 1);
+	int tiles_per_block_geom = NUM_THREADS/ num_cams;
+	dim3 threads_geom(num_cams,tiles_per_block_geom, 1);
+	dim3 grid_geom   ((num_tiles + tiles_per_block_geom - 1)/tiles_per_block_geom, 1, 1);
+//#define NUM_THREADS                   32
+
 	if (threadIdx.x == 0) { // always 1
     	get_tiles_offsets<<<grid_geom,threads_geom>>> (
-    			gpu_tasks,               // struct tp_task     * gpu_tasks,
+    			num_cams,                // int                  num_cams,
+				gpu_ftasks,              // float              * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
+//    			gpu_tasks,               // struct tp_task     * gpu_tasks,
 				num_tiles,               // int                  num_tiles,          // number of tiles in task list
 				gpu_geometry_correction, //	struct gc          * gpu_geometry_correction,
 				gpu_correction_vector,   //	struct corr_vector * gpu_correction_vector,
@@ -313,66 +341,76 @@ extern "C" __global__ void calculate_tiles_offsets(
  */
 
 extern "C" __global__ void get_tiles_offsets(
-		struct tp_task     * gpu_tasks,
+		int                  num_cams,
+//		struct tp_task     * gpu_tasks,
+		float              * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
 		int                  num_tiles,          // number of tiles in task
 		struct gc          * gpu_geometry_correction,
 		struct corr_vector * gpu_correction_vector,
 		float *              gpu_rByRDist,      // length should match RBYRDIST_LEN
-		trot_deriv   * gpu_rot_deriv)
+		trot_deriv *         gpu_rot_deriv)
 {
+	int task_size = get_task_size(num_cams);
 	int task_num = blockIdx.x * blockDim.y + threadIdx.y; //  blockIdx.x * TILES_PER_BLOCK_GEOM + threadIdx.y
 	int thread_xy = blockDim.x * threadIdx.y + threadIdx.x;
+	int dim_xy = blockDim.x * blockDim.y; // number of parallel threads (<=32)
 	__shared__ struct gc geometry_correction;
 	__shared__ float rByRDist [RBYRDIST_LEN];
 	__shared__ struct corr_vector extrinsic_corr;
 	__shared__ trot_deriv rot_deriv;
-	__shared__ float pY_offsets[TILES_PER_BLOCK_GEOM][NUM_CAMS];
+///	__shared__ float pY_offsets[TILES_PER_BLOCK_GEOM][NUM_CAMS];
+	__shared__ float pY_offsets[NUM_THREADS][NUM_CAMS]; // maximal dimensions, actual will be smaller
 	float pXY[2]; // result to be copied to task
+	//blockDim.y
 	// copy data common to all threads
 	{
+		int cycles_copy_gc = ((sizeof(struct gc)/sizeof(float) + dim_xy - 1) / dim_xy);
 		float * gcp_local =  (float *) &geometry_correction;
 		float * gcp_global = (float *) gpu_geometry_correction;
 		int offset = thread_xy;
-		for (int i = 0; i < CYCLES_COPY_GC; i++){
+		for (int i = 0; i < cycles_copy_gc; i++){
 			if (offset < sizeof(struct gc)/sizeof(float)) {
 				*(gcp_local + offset) = *(gcp_global + offset);
 			}
-			offset += THREADS_PER_BLOCK_GEOM;
+			offset += dim_xy;
 		}
 	}
 	{
+		int cycles_copy_cv = ((sizeof(struct corr_vector)/sizeof(float) + dim_xy - 1) / dim_xy);
 		float * cvp_local =  (float *) &extrinsic_corr;
 		float * cvp_global = (float *) gpu_correction_vector;
 		int offset = thread_xy;
-		for (int i = 0; i < CYCLES_COPY_CV; i++){
+		for (int i = 0; i < cycles_copy_cv; i++){
 			if (offset < sizeof(struct corr_vector)/sizeof(float)) {
 				*(cvp_local + offset) = *(cvp_global + offset);
 			}
-			offset += THREADS_PER_BLOCK_GEOM;
+			offset += dim_xy;
 		}
 	}
 	// TODO: maybe it is better to use system memory and not read all table?
 	{
+		int cycles_copy_rbrd = (RBYRDIST_LEN + dim_xy - 1) / dim_xy;
 		float * rByRDistp_local =  (float *) rByRDist;
 		float * rByRDistp_global = (float *) gpu_rByRDist;
 		int offset = thread_xy;
-		for (int i = 0; i < CYCLES_COPY_RBRD; i++){
+		for (int i = 0; i < cycles_copy_rbrd; i++){
 			if (offset < RBYRDIST_LEN) {
 				*(rByRDistp_local + offset) = *(rByRDistp_global + offset);
 			}
-			offset += THREADS_PER_BLOCK_GEOM;
+			offset += dim_xy;
 		}
 	}
 	// copy rotational  matrices (with their derivatives by azimuth, tilt, roll and zoom - for ERS correction)
 	{
+		int cycles_copy_rot = ((sizeof(trot_deriv)/sizeof(float)) + dim_xy - 1) / dim_xy;
 		float * rots_local =  (float *) &rot_deriv;
 		float * rots_global = (float *) gpu_rot_deriv; // rot_matrices;
 		int offset = thread_xy;
-		for (int i = 0; i < CYCLES_COPY_ROTS; i++){
+		for (int i = 0; i < cycles_copy_rot; i++){
 			if (offset < sizeof(trot_deriv)/sizeof(float)) {
 				*(rots_local + offset) = *(rots_global + offset);
 			}
-			offset += THREADS_PER_BLOCK_GEOM;
+			offset += dim_xy;
 		}
 	}
 	__syncthreads();
@@ -411,8 +449,10 @@ extern "C" __global__ void get_tiles_offsets(
 	 */
 
 	// common code, calculated in parallel
-	int cxy = gpu_tasks[task_num].txy;
-	float disparity = gpu_tasks[task_num].target_disparity;
+///	int cxy = gpu_tasks[task_num].txy;
+///	float disparity = gpu_tasks[task_num].target_disparity;
+	int cxy =  *(int *) (gpu_ftasks +  task_size * task_num + 1);
+	float disparity = * (gpu_ftasks +  task_size * task_num + 2);
 	int tileX = (cxy & 0xffff);
 	int tileY = (cxy >> 16);
 #ifdef DEBUG23
@@ -638,11 +678,15 @@ extern "C" __global__ void get_tiles_offsets(
 	}
 	__syncthreads();// __syncwarp();
 #endif // DEBUG21
-
-	gpu_tasks[task_num].disp_dist[ncam][0] = disp_dist[0];
-	gpu_tasks[task_num].disp_dist[ncam][1] = disp_dist[1];
-	gpu_tasks[task_num].disp_dist[ncam][2] = disp_dist[2];
-	gpu_tasks[task_num].disp_dist[ncam][3] = disp_dist[3];
+///	gpu_tasks[task_num].disp_dist[ncam][0] = disp_dist[0];
+///	gpu_tasks[task_num].disp_dist[ncam][1] = disp_dist[1];
+///	gpu_tasks[task_num].disp_dist[ncam][2] = disp_dist[2];
+///	gpu_tasks[task_num].disp_dist[ncam][3] = disp_dist[3];
+	float * disp_dist_p = gpu_ftasks +  task_size * task_num + 3 + ncam * 4; //  ncam = threadIdx.x, so each thread will have different offset
+	*(disp_dist_p++) = disp_dist[0]; // global memory
+	*(disp_dist_p++) = disp_dist[1];
+	*(disp_dist_p++) = disp_dist[2];
+	*(disp_dist_p++) = disp_dist[3];
 
 	//	imu =  extrinsic_corr.getIMU(i); // currently it is common for all channels
 	//	float imu_rot [3]; // d_tilt/dt (rad/s), d_az/dt, d_roll/dt 13..15
@@ -697,8 +741,11 @@ extern "C" __global__ void get_tiles_offsets(
 		}
 	}
 	// copy results to global memory pXY,  disp_dist
-	gpu_tasks[task_num].xy[ncam][0] = pXY[0];
-	gpu_tasks[task_num].xy[ncam][1] = pXY[1];
+//	gpu_tasks[task_num].xy[ncam][0] = pXY[0];
+//	gpu_tasks[task_num].xy[ncam][1] = pXY[1];
+	float * tile_xy_p = gpu_ftasks +  task_size * task_num + 3 + num_cams * 4 + ncam * 2; //  ncam = threadIdx.x, so each thread will have different offset
+	*(tile_xy_p++) = pXY[0]; // global memory
+	*(tile_xy_p++) = pXY[1]; // global memory
 }
 
 extern "C" __global__ void calcReverseDistortionTable(

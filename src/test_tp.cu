@@ -715,6 +715,7 @@ int main(int argc, char **argv)
     	}
 
     	calc_rot_deriv<<<grid_rot,threads_rot>>> (
+    			num_cams,                // int                  num_cams,
     			gpu_correction_vector ,           // 		struct corr_vector * gpu_correction_vector,
     			gpu_rot_deriv);                  // union trot_deriv   * gpu_rot_deriv);
 
@@ -821,6 +822,7 @@ int main(int argc, char **argv)
     	}
 /*
     	get_tiles_offsets<<<grid_geom,threads_geom>>> (
+    			num_cams,                // int                  num_cams,
     			gpu_tasks,               // struct tp_task     * gpu_tasks,
 				tp_task_size,            // int                  num_tiles,          // number of tiles in task list
 				gpu_geometry_correction, //	struct gc          * gpu_geometry_correction,
@@ -829,7 +831,9 @@ int main(int argc, char **argv)
 				gpu_rot_deriv);          // union trot_deriv   * gpu_rot_deriv);
 				*/
     	calculate_tiles_offsets<<<1,1>>> (
-    			gpu_tasks,               // struct tp_task     * gpu_tasks,
+    			num_cams,                // int                  num_cams,
+				gpu_ftasks,              // float              * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
+//    			gpu_tasks,               // struct tp_task     * gpu_tasks,
 				tp_task_size,            // int                  num_tiles,          // number of tiles in task list
 				gpu_geometry_correction, //	struct gc          * gpu_geometry_correction,
 				gpu_correction_vector,   //	struct corr_vector * gpu_correction_vector,
@@ -1273,7 +1277,8 @@ int main(int argc, char **argv)
 		cudaFuncSetAttribute(textures_nonoverlap, cudaFuncAttributeMaxDynamicSharedMemorySize, 65536); // for CC 7.5
     	textures_nonoverlap<<<1,1>>> (
     			num_cams,              // int                num_cams,           // number of cameras used
-                gpu_tasks,             // struct tp_task   * gpu_tasks,
+				gpu_ftasks,          // float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats
+//                gpu_tasks,             // struct tp_task   * gpu_tasks,
                 tp_task_size,          // int                num_tiles,          // number of tiles in task list
     	// declare arrays in device code?
 				gpu_texture_indices,   // int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
@@ -1365,7 +1370,8 @@ int main(int argc, char **argv)
     	generate_RBGA<<<1,1>>> (
     			num_cams,              // int                num_cams,           // number of cameras used
     	// Parameters to generate texture tasks
-                gpu_tasks,             // struct tp_task   * gpu_tasks,
+				gpu_ftasks,         // float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
+//                gpu_tasks,             // struct tp_task   * gpu_tasks,
                 tp_task_size,          // int                num_tiles,          // number of tiles in task list
 		// Does not require initialized gpu_texture_indices to be initialized - just allocated, will generate.
 	            gpu_texture_indices,   // int              * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
