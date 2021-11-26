@@ -1031,7 +1031,11 @@ __global__ void index_direct(
 
 __global__ void index_correlate(
 		int               num_cams,
-		int *             sel_pairs,
+//		int *             sel_pairs,           // unused bits should be 0
+		int               sel_pairs0,
+		int               sel_pairs1,
+		int               sel_pairs2,
+		int               sel_pairs3,
 		float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
 //		struct tp_task   * gpu_tasks,
 		int                num_tiles,         // number of tiles in task
@@ -1161,7 +1165,11 @@ __device__ int get_textures_shared_size( // in bytes
  */
 extern "C" __global__ void correlate2D(
 		int               num_cams,
-		int *             sel_pairs,
+//		int *             sel_pairs,
+		int               sel_pairs0,
+		int               sel_pairs1,
+		int               sel_pairs2,
+		int               sel_pairs3,
 		float          ** gpu_clt,            // [num_cams] ->[TILES-Y][TILES-X][colors][DTT_SIZE*DTT_SIZE]
 		int               colors,             // number of colors (3/1)
 		float             scale0,             // scale for R
@@ -1184,29 +1192,34 @@ extern "C" __global__ void correlate2D(
 		 *pnum_corr_tiles = 0;
 		 index_correlate<<<blocks0,threads0>>>(
 				 num_cams,            // int               num_cams,
-				 sel_pairs,           // int *             sel_pairs,
+//				 sel_pairs,           // int *             sel_pairs,
+				 sel_pairs0,          // int               sel_pairs0,
+				 sel_pairs1,          // int               sel_pairs1,
+				 sel_pairs2,          // int               sel_pairs2,
+				 sel_pairs3,          // int               sel_pairs3,
+
 				 gpu_ftasks,          // float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
-//				 gpu_tasks,           // struct tp_task   * gpu_tasks,
+				 //				 gpu_tasks,           // struct tp_task   * gpu_tasks,
 				 num_tiles,           // int                num_tiles,          // number of tiles in task
 				 tilesx,              // int                width,                // number of tiles in a row
 				 gpu_corr_indices,    // int *              gpu_corr_indices,  // array of correlation tasks
 				 pnum_corr_tiles);    // int *              pnum_corr_tiles);   // pointer to the length of correlation tasks array
 		 cudaDeviceSynchronize();
-		    dim3 threads_corr(CORR_THREADS_PER_TILE, CORR_TILES_PER_BLOCK, 1);
-		    dim3 grid_corr((*pnum_corr_tiles + CORR_TILES_PER_BLOCK-1) / CORR_TILES_PER_BLOCK,1,1);
-		        correlate2D_inner<<<grid_corr,threads_corr>>>(
-						num_cams,           // int               num_cams,
-		        		gpu_clt,            // float          ** gpu_clt,            // [num_cams] ->[TILES-Y][TILES-X][colors][DTT_SIZE*DTT_SIZE]
-						colors,             // int               colors,             // number of colors (3/1)
-						scale0,             // float             scale0,             // scale for R
-						scale1,             // float             scale1,             // scale for B
-						scale2,             // float             scale2,             // scale for G
-						fat_zero,           // float             fat_zero,           // here - absolute
-		        		*pnum_corr_tiles,   // size_t            num_corr_tiles,     // number of correlation tiles to process
-		        		gpu_corr_indices,   //  int             * gpu_corr_indices,  // packed tile+pair
-						corr_stride,        // const size_t      corr_stride,        // in floats
-						corr_radius,        // int               corr_radius,        // radius of the output correlation (7 for 15x15)
-		        		gpu_corrs);         // float           * gpu_corrs);         // correlation output data
+		 dim3 threads_corr(CORR_THREADS_PER_TILE, CORR_TILES_PER_BLOCK, 1);
+		 dim3 grid_corr((*pnum_corr_tiles + CORR_TILES_PER_BLOCK-1) / CORR_TILES_PER_BLOCK,1,1);
+		 correlate2D_inner<<<grid_corr,threads_corr>>>(
+				 num_cams,           // int               num_cams,
+				 gpu_clt,            // float          ** gpu_clt,            // [num_cams] ->[TILES-Y][TILES-X][colors][DTT_SIZE*DTT_SIZE]
+				 colors,             // int               colors,             // number of colors (3/1)
+				 scale0,             // float             scale0,             // scale for R
+				 scale1,             // float             scale1,             // scale for B
+				 scale2,             // float             scale2,             // scale for G
+				 fat_zero,           // float             fat_zero,           // here - absolute
+				 *pnum_corr_tiles,   // size_t            num_corr_tiles,     // number of correlation tiles to process
+				 gpu_corr_indices,   //  int             * gpu_corr_indices,  // packed tile+pair
+				 corr_stride,        // const size_t      corr_stride,        // in floats
+				 corr_radius,        // int               corr_radius,        // radius of the output correlation (7 for 15x15)
+				 gpu_corrs);         // float           * gpu_corrs);         // correlation output data
 	 }
 }
 
@@ -2493,7 +2506,11 @@ __global__ void create_nonoverlap_list(
  */
 __global__ void index_correlate(
 		int               num_cams,
-		int *             sel_pairs,           // unused bits should be 0
+//		int *             sel_pairs,           // unused bits should be 0
+		int               sel_pairs0,
+		int               sel_pairs1,
+		int               sel_pairs2,
+		int               sel_pairs3,
 		float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
 //		struct tp_task   * gpu_tasks,
 		int                num_tiles,         // number of tiles in task
@@ -2505,6 +2522,7 @@ __global__ void index_correlate(
 	if (num_tile >= num_tiles){
 		return;
 	}
+    int sel_pairs[] = {sel_pairs0, sel_pairs1, sel_pairs2, sel_pairs3};
 	//	int task_size = get_task_size(num_cams);
 	int task_task =get_task_task(num_tile, gpu_ftasks, num_cams);
 	if (((task_task >> TASK_CORR_BITS) & 1) == 0){ // needs correlation. Maybe just check task_task != 0?

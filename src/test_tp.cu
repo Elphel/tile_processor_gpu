@@ -30,6 +30,12 @@
  ** -----------------------------------------------------------------------------**
  */
 
+#define NOCORR
+#define NOCORR_TD
+#define NOTEXTURES
+#define NOTEXTURE_RGBA
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -297,11 +303,29 @@ int main(int argc, char **argv)
     const char* rByRDist_file =            "/home/eyesis/git/tile_processor_gpu/clt/main.rbyrdist";
     const char* correction_vector_file =   "/home/eyesis/git/tile_processor_gpu/clt/main.correction_vector";
     const char* geometry_correction_file = "/home/eyesis/git/tile_processor_gpu/clt/main.geometry_correction";
+	int sel_pairs[4];
 
+#if TEST_LWIR
+    // testing with 16 LWIR
+    int num_cams =   16;
+    int num_colors = 1;
+    sel_pairs[0] =   0xffffffff;
+    sel_pairs[1] =   0xffffffff;
+    sel_pairs[2] =   0xffffffff;
+    sel_pairs[3] =   0x00ffffff;
+    int num_pairs = 120;
+#else
     // testing with quad RGB
     int num_cams =   4;
     int num_colors = 3;
-	int task_size = sizeof(struct tp_task)/sizeof(float) - 6 * (NUM_CAMS - num_cams);
+    sel_pairs[0] = 0x3f;
+    sel_pairs[1] =   0;
+    sel_pairs[2] =   0;
+    sel_pairs[3] =   0;
+    int num_pairs =  6;
+#endif
+
+	int task_size = get_task_size(num_cams); // sizeof(struct tp_task)/sizeof(float) - 6 * (NUM_CAMS - num_cams);
 
 	// FIXME: update to use new correlations and num_cams
     float port_offsets4[4][2] =  {// used only in textures to scale differences
@@ -318,7 +342,6 @@ int main(int argc, char **argv)
     	}
     } else {
 		 for (int ncam = 0; ncam < num_cams; ncam++) {
-//			 double alpha = 2 * Math.PI * (i + (topis0 ? 0 : 0.5))/num_sensors;
 			 double alpha = 2 * M_PI * (ncam) /num_cams; // math.h
 			 port_offsets[ncam][0] =  0.5 * sin((alpha));
 			 port_offsets[ncam][1] = -0.5 * cos((alpha));
@@ -338,8 +361,8 @@ int main(int argc, char **argv)
 
     float            * host_kern_buf =  (float *)malloc(KERN_SIZE * sizeof(float));
 // static - see https://stackoverflow.com/questions/20253267/segmentation-fault-before-main
-    static struct tp_task     task_data   [TILESX*TILESY]; // maximal length - each tile
-    static struct tp_task     task_data1  [TILESX*TILESY]; // maximal length - each tile
+///    static struct tp_task     task_data   [TILESX*TILESY]; // maximal length - each tile
+///    static struct tp_task     task_data1  [TILESX*TILESY]; // maximal length - each tile
 
     float * ftask_data  = (float *) malloc(TILESX * TILESY * task_size * sizeof(float));
     float * ftask_data1  = (float *) malloc(TILESX * TILESY * task_size * sizeof(float));
@@ -387,8 +410,8 @@ int main(int argc, char **argv)
 
 
     // GPU pointers to GPU memory
-    struct tp_task  * gpu_tasks;  // TODO: ***** remove ! ****
-    float *           gpu_ftasks; // TODO: ***** allocate ! ****
+///    struct tp_task  * gpu_tasks;  // TODO: ***** remove ! **** DONE
+    float *           gpu_ftasks; // TODO: ***** allocate ! **** DONE
     int *             gpu_active_tiles;
     int *             gpu_num_active;
     int *             gpu_num_corr_tiles;
@@ -473,13 +496,13 @@ int main(int argc, char **argv)
     gpu_corrs = alloc_image_gpu(
     		&dstride_corr,                  // in bytes ! for one 2d phase correlation (padded 15x15x4 bytes)
 			CORR_SIZE,                      // int width,
-			NUM_PAIRS * TILESX * TILESY);   // int height);
+			num_pairs * TILESX * TILESY);   // int height);
     // read channel images (assuming host_kern_buf size > image size, reusing it)
 // allocate all other correlation data, some may be
     gpu_corrs_td = alloc_image_gpu(
     		&dstride_corr_td,               // in bytes ! for one 2d phase correlation (padded 15x15x4 bytes)
 			4 * DTT_SIZE * DTT_SIZE,         // int width,
-			NUM_PAIRS * TILESX * TILESY);    // int height);
+			num_pairs * TILESX * TILESY);    // int height);
 
     gpu_corrs_combo = alloc_image_gpu(
     		&dstride_corr_combo,             // in bytes ! for one 2d phase correlation (padded 15x15x4 bytes)
@@ -534,7 +557,8 @@ int main(int argc, char **argv)
     for (int ty = 0; ty < TILESY; ty++){
         for (int tx = 0; tx < TILESX; tx++){
             int nt = ty * TILESX + tx;
-            int task_task = 0xf | (((1 << NUM_PAIRS)-1) << TASK_CORR_BITS);
+//            int task_task = 0xf | (((1 << NUM_PAIRS)-1) << TASK_CORR_BITS);
+            int task_task = 0xf | (1 << TASK_CORR_BITS); // just 1 bit, correlation selection is defined by common corr_sel bits
             int task_txy = tx + (ty << 16);
             float task_target_disparity = DBG_DISPARITY;
             float * tp = ftask_data + task_size * nt;
@@ -548,7 +572,7 @@ int main(int argc, char **argv)
         }
     }
 
-    int tp_task_size =  sizeof(ftask_data)/sizeof(float)/task_size;
+    int tp_task_size =  TILESX * TILESY; // sizeof(ftask_data)/sizeof(float)/task_size; // number of task tiles
     int num_active_tiles; // will be calculated by convert_direct
 
 
@@ -574,8 +598,9 @@ int main(int argc, char **argv)
 #endif
 
     // segfault in the next
-    gpu_tasks =  (struct tp_task  *) copyalloc_kernel_gpu((float * ) &task_data, tp_task_size * (sizeof(struct tp_task)/sizeof(float)));
-    gpu_ftasks = (float  *) copyalloc_kernel_gpu((float * ) &ftask_data, tp_task_size * task_size); // (sizeof(struct tp_task)/sizeof(float)));
+///    gpu_tasks =  (struct tp_task  *) copyalloc_kernel_gpu((float * ) &task_data, tp_task_size * (sizeof(struct tp_task)/sizeof(float)));
+//    gpu_ftasks = (float  *) copyalloc_kernel_gpu((float * ) &ftask_data, tp_task_size * task_size); // (sizeof(struct tp_task)/sizeof(float)));
+    gpu_ftasks = (float  *) copyalloc_kernel_gpu(ftask_data, tp_task_size * task_size); // (sizeof(struct tp_task)/sizeof(float)));
 
     // build corr_indices - not needed anymore?
     /*
@@ -599,7 +624,7 @@ int main(int argc, char **argv)
 			NUM_PAIRS * TILESX * TILESY);
     */
     // just allocate
-    checkCudaErrors (cudaMalloc((void **)&gpu_corr_indices,        NUM_PAIRS * TILESX * TILESY*sizeof(int)));
+    checkCudaErrors (cudaMalloc((void **)&gpu_corr_indices,        num_pairs * TILESX * TILESY*sizeof(int)));
     checkCudaErrors (cudaMalloc((void **)&gpu_corrs_combo_indices,             TILESX * TILESY*sizeof(int)));
 //
 
@@ -849,12 +874,20 @@ int main(int argc, char **argv)
     float avgTimeGEOM = (float)sdkGetTimerValue(&timerGEOM) / (float)numIterations;
     sdkDeleteTimer(&timerGEOM);
     printf("Average TextureList run time =%f ms\n",  avgTimeGEOM);
-
+/*
 	checkCudaErrors(cudaMemcpy( // copy modified/calculated tasks
 			&task_data1,
 			gpu_tasks,
 			tp_task_size * sizeof(struct tp_task),
 			cudaMemcpyDeviceToHost));
+*/
+	checkCudaErrors(cudaMemcpy( // copy modified/calculated tasks
+			ftask_data1,
+			gpu_ftasks,
+			tp_task_size * task_size *sizeof(float),
+			cudaMemcpyDeviceToHost));
+
+//task_size
 #if 0 // for manual browsing
 	struct tp_task * old_task = &task_data [DBG_TILE];
 	struct tp_task * new_task = &task_data1[DBG_TILE];
@@ -1079,10 +1112,13 @@ int main(int argc, char **argv)
     		sdkResetTimer(&timerCORR);
     		sdkStartTimer(&timerCORR);
     	}
-    	// FIXME: update to provide sel_pairs
     	correlate2D<<<1,1>>>(
     			num_cams,                      // int               num_cams,
-				0,                             // int *             sel_pairs,           // unused bits should be 0
+//				0,                             // int *             sel_pairs,           // unused bits should be 0
+				sel_pairs[0], // int               sel_pairs0           // unused bits should be 0
+				sel_pairs[1], // int               sel_pairs1,           // unused bits should be 0
+				sel_pairs[2], // int               sel_pairs2,           // unused bits should be 0
+				sel_pairs[3], // int               sel_pairs3,           // unused bits should be 0
 				gpu_clt,                    // float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 				3,                          // int               colors,             // number of colors (3/1)
 				color_weights[0], // 0.25,  // float             scale0,             // scale for R
@@ -1156,8 +1192,11 @@ int main(int argc, char **argv)
     	// FIXME: provide sel_pairs
         correlate2D<<<1,1>>>( // output TD tiles, no normalization
         		num_cams,                      // int               num_cams,
-        		0,                             // int *             sel_pairs,           // unused bits should be 0
-
+				//				0,                             // int *             sel_pairs,           // unused bits should be 0
+				sel_pairs[0], // int               sel_pairs0           // unused bits should be 0
+				sel_pairs[1], // int               sel_pairs1,           // unused bits should be 0
+				sel_pairs[2], // int               sel_pairs2,           // unused bits should be 0
+				sel_pairs[3], // int               sel_pairs3,           // unused bits should be 0
         		gpu_clt,                       // float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 				3,                             // int               colors,             // number of colors (3/1)
 				color_weights[0], // 0.25,     // float             scale0,             // scale for R
@@ -1182,11 +1221,11 @@ int main(int argc, char **argv)
     			gpu_num_corr_tiles,
     			sizeof(int),
     			cudaMemcpyDeviceToHost));
-    	num_corr_combo = num_corrs/NUM_PAIRS;
+    	num_corr_combo = num_corrs/num_pairs;
 
     	corr2D_combine<<<1,1>>>( // Combine quad (2 hor, 2 vert) pairs
     			num_corr_combo, // tp_task_size,     // int               num_tiles,          // number of tiles to process (each with num_pairs)
-				NUM_PAIRS,                           // int               num_pairs,          // num pairs per tile (should be the same)
+				num_pairs,                           // int               num_pairs,          // num pairs per tile (should be the same)
     			1,                                   // int               init_output,        // !=0 - reset output tiles to zero before accumulating
     			0x0f,                                // int               pairs_mask,         // selected pairs (0x3 - horizontal, 0xc - vertical, 0xf - quad, 0x30 - cross)
 				gpu_corr_indices,                    // int             * gpu_corr_indices,   // packed tile+pair
@@ -1464,7 +1503,8 @@ int main(int argc, char **argv)
     	checkCudaErrors(cudaFree(gpu_clt_h[ncam]));
     	checkCudaErrors(cudaFree(gpu_corr_images_h[ncam]));
     }
-	checkCudaErrors(cudaFree(gpu_tasks));
+//	checkCudaErrors(cudaFree(gpu_tasks));
+	checkCudaErrors(cudaFree(gpu_ftasks));
 	checkCudaErrors(cudaFree(gpu_active_tiles));
 	checkCudaErrors(cudaFree(gpu_num_active));
 	checkCudaErrors(cudaFree(gpu_kernels));

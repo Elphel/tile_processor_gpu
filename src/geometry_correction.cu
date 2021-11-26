@@ -37,10 +37,15 @@
 
 */
 #ifndef JCUDA
-#include "tp_defines.h"
-#include "dtt8x8.h"
-#include "geometry_correction.h"
+	#include "tp_defines.h"
+	#include "dtt8x8.h"
+	#include "geometry_correction.h"
 #endif // #ifndef JCUDA
+
+#ifndef get_task_size
+	#define get_task_size(x) (sizeof(struct tp_task)/sizeof(float) - 6 * (NUM_CAMS - x))
+#endif
+
 
 // Using NUM_CAMS threads per tile
 #define THREADS_PER_BLOCK_GEOM (TILES_PER_BLOCK_GEOM * NUM_CAMS)

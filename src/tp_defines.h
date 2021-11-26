@@ -41,14 +41,22 @@
 #ifndef JCUDA
 #include <stdio.h>
 #define THREADSX              (DTT_SIZE)
-#define TEST_LWIR                      1
+#define TEST_LWIR                      0
 #define NUM_CAMS                      16 // now maximal number of cameras
-#define NUM_PAIRS                      6
+//#define NUM_PAIRS                      6
 #define NUM_COLORS                     1 //3
-#define IMG_WIDTH                   2592
-#define IMG_HEIGHT                  1936
-#define KERNELS_HOR                  164
-#define KERNELS_VERT                 123
+// kernels [num_cams][num_colors][KERNELS_HOR][KERNELS_VERT][4][64]
+#if TEST_LWIR
+	#define IMG_WIDTH                   640
+	#define IMG_HEIGHT                  512
+	#define KERNELS_HOR                 82 // 80+2
+	#define KERNELS_VERT                66 // 64+2
+#else
+	#define IMG_WIDTH                  2592
+	#define IMG_HEIGHT                 1936
+	#define KERNELS_HOR                 164  // 2592 / 16 + 2
+	#define KERNELS_VERT                123  // 1936 / 16 + 2
+#endif
 #define KERNELS_LSTEP                  4
 #define THREADS_PER_TILE               8
 #define TILES_PER_BLOCK                4
@@ -73,7 +81,7 @@
 #define TASK_TEXTURE_W_BIT             3 // Texture with West  neighbor
 #define TASK_TEXTURE_BIT               3 // bit to request texture calculation int task field of struct tp_task
 #define LIST_TEXTURE_BIT               7 // bit to request texture calculation
-#define CORR_OUT_RAD                   4
+#define CORR_OUT_RAD                   7 // full tile (15x15), was 4 (9x9)
 #define FAT_ZERO_WEIGHT                0.0001 // add to port weights to avoid nan
 
 #define THREADS_DYNAMIC_BITS           5 // treads in block for CDP creation of the texture list

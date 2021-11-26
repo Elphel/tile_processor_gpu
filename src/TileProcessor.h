@@ -65,7 +65,11 @@ extern "C" __global__ void convert_direct( // called with a single block, single
 
 extern "C" __global__ void correlate2D(
 		int               num_cams,
-		int *             sel_pairs,
+//		int *             sel_pairs,
+		int               sel_pairs0,
+		int               sel_pairs1,
+		int               sel_pairs2,
+		int               sel_pairs3,
 		float          ** gpu_clt,            // [NUM_CAMS] ->[TILES-Y][TILES-X][NUM_COLORS][DTT_SIZE*DTT_SIZE]
 		int               colors,             // number of colors (3/1)
 		float             scale0,             // scale for R
