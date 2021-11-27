@@ -156,6 +156,8 @@ int get_file_size(std::string filename) // path to file
 int readFloatsFromFile(float *       data, // allocated array
 					   const char *  path) // file path
 {
+    printf("readFloatsFromFile(%s)\n", path);
+
     int fsize = get_file_size(path);
     std::ifstream input(path, std::ios::binary );
     // copies all data into buffer
@@ -254,8 +256,128 @@ int main(int argc, char **argv)
     //initialize CUDA
     findCudaDevice(argc, (const char **)argv);
 
-    // CLT testing
+#if TEST_LWIR
+    const char* kernel_file[] = {
+    		"/home/eyesis/git/tile_processor_gpu/clt/aux_chn0_transposed.kernel",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn1_transposed.kernel",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn2_transposed.kernel",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn3_transposed.kernel",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn4_transposed.kernel",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn5_transposed.kernel",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn6_transposed.kernel",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn7_transposed.kernel",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn8_transposed.kernel",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn9_transposed.kernel",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn10_transposed.kernel",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn11_transposed.kernel",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn12_transposed.kernel",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn13_transposed.kernel",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn14_transposed.kernel",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn15_transposed.kernel"};
 
+    const char* kernel_offs_file[] = {
+    		"/home/eyesis/git/tile_processor_gpu/clt/aux_chn0_transposed.kernel_offsets",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn1_transposed.kernel_offsets",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn2_transposed.kernel_offsets",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn3_transposed.kernel_offsets",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn4_transposed.kernel_offsets",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn5_transposed.kernel_offsets",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn6_transposed.kernel_offsets",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn7_transposed.kernel_offsets",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn8_transposed.kernel_offsets",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn9_transposed.kernel_offsets",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn10_transposed.kernel_offsets",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn11_transposed.kernel_offsets",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn12_transposed.kernel_offsets",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn13_transposed.kernel_offsets",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn14_transposed.kernel_offsets",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn15_transposed.kernel_offsets"};
+
+    const char* image_files[] = {
+    		"/home/eyesis/git/tile_processor_gpu/clt/aux_chn0.bayer",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn1.bayer",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn2.bayer",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn3.bayer",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn4.bayer",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn5.bayer",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn6.bayer",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn7.bayer",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn8.bayer",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn9.bayer",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn10.bayer",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn11.bayer",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn12.bayer",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn13.bayer",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn14.bayer",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn15.bayer"};
+
+    const char* ports_offs_xy_file[] = {
+    		"/home/eyesis/git/tile_processor_gpu/clt/aux_chn0.portsxy",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn1.portsxy",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn2.portsxy",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn3.portsxy",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn4.portsxy",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn5.portsxy",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn6.portsxy",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn7.portsxy",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn8.portsxy",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn9.portsxy",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn10.portsxy",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn11.portsxy",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn12.portsxy",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn13.portsxy",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn14.portsxy",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn15.portsxy"};
+
+//#ifndef DBG_TILE
+    /*
+    const char* ports_clt_file[] = { // never referenced
+    		"/home/eyesis/git/tile_processor_gpu/clt/aux_chn0.clt",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn1.clt",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn2.clt",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn3.clt",
+    		"/home/eyesis/git/tile_processor_gpu/clt/aux_chn4.clt",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn5.clt",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn6.clt",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn7.clt",
+    		"/home/eyesis/git/tile_processor_gpu/clt/aux_chn8.clt",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn9.clt",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn10.clt",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn11.clt",
+    		"/home/eyesis/git/tile_processor_gpu/clt/aux_chn12.clt",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn13.clt",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn14.clt",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn15.clt"};
+*/
+    const char* result_rbg_file[] = {
+    		"/home/eyesis/git/tile_processor_gpu/clt/aux_chn0.rbg",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn1.rbg",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn2.rbg",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn3.rbg",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn4.rbg",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn5.rbg",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn6.rbg",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn7.rbg",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn8.rbg",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn9.rbg",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn10.rbg",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn11.rbg",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn12.rbg",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn13.rbg",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn14.rbg",
+			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn15.rbg"};
+//#endif
+    const char* result_corr_file =          "/home/eyesis/git/tile_processor_gpu/clt/aux_corr.corr";
+    const char* result_corr_quad_file =     "/home/eyesis/git/tile_processor_gpu/clt/aux_corr-quad.corr";
+///    const char* result_corr_cross_file = "/home/eyesis/git/tile_processor_gpu/clt/aux_corr-cross.corr";
+    const char* result_textures_file =      "/home/eyesis/git/tile_processor_gpu/clt/texture_aux.rgba";
+    const char* result_textures_rgba_file = "/home/eyesis/git/tile_processor_gpu/clt/texture_rgba_aux.rgba";
+
+    const char* rByRDist_file =             "/home/eyesis/git/tile_processor_gpu/clt/aux.rbyrdist";
+    const char* correction_vector_file =    "/home/eyesis/git/tile_processor_gpu/clt/aux.correction_vector";
+    const char* geometry_correction_file =  "/home/eyesis/git/tile_processor_gpu/clt/aux.geometry_correction";
+
+#else
     const char* kernel_file[] = {
     		"/home/eyesis/git/tile_processor_gpu/clt/main_chn0_transposed.kernel",
 			"/home/eyesis/git/tile_processor_gpu/clt/main_chn1_transposed.kernel",
@@ -303,6 +425,10 @@ int main(int argc, char **argv)
     const char* rByRDist_file =            "/home/eyesis/git/tile_processor_gpu/clt/main.rbyrdist";
     const char* correction_vector_file =   "/home/eyesis/git/tile_processor_gpu/clt/main.correction_vector";
     const char* geometry_correction_file = "/home/eyesis/git/tile_processor_gpu/clt/main.geometry_correction";
+#endif
+
+
+
 	int sel_pairs[4];
 
 #if TEST_LWIR
@@ -490,7 +616,8 @@ int main(int argc, char **argv)
         gpu_corr_images_h[ncam] = alloc_image_gpu(
         		&dstride_rslt,                // size_t* dstride, // in bytes!!
 				IMG_WIDTH + DTT_SIZE,         // int width,
-				3*(IMG_HEIGHT + DTT_SIZE));   // int height);
+//				3*(IMG_HEIGHT + DTT_SIZE));   // int height);
+				num_colors*(IMG_HEIGHT + DTT_SIZE));   // int height);
     }
     // allocates one correlation kernel per line (15x15 floats), number of rows - number of tiles * number of pairs
     gpu_corrs = alloc_image_gpu(
@@ -1083,7 +1210,8 @@ int main(int argc, char **argv)
 				gpu_corr_images_h[ncam],
 				dstride_rslt,
 				(IMG_WIDTH + DTT_SIZE) * sizeof(float),
-				3* (IMG_HEIGHT + DTT_SIZE),
+//				3* (IMG_HEIGHT + DTT_SIZE),
+				num_colors* (IMG_HEIGHT + DTT_SIZE),
     			cudaMemcpyDeviceToHost));
 
 ///#ifndef DBG_TILE

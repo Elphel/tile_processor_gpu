@@ -57,8 +57,8 @@
 
 #define DBG_CAM 3
 
-__device__ void printGeometryCorrection(struct gc * g);
-__device__ void printExtrinsicCorrection(corr_vector * cv);
+__device__ void printGeometryCorrection(struct gc * g, int num_cams);
+__device__ void printExtrinsicCorrection(corr_vector * cv, int num_cams);
 
 
 /**
@@ -436,8 +436,8 @@ extern "C" __global__ void get_tiles_offsets(
 	if ((ncam == DBG_CAM)  && (task_num == DBG_TILE)){
 		printf("\nTile = %d, camera= %d\n", task_num, ncam);
 		printf("\nget_tiles_offsets() threadIdx.x = %d,  threadIdx.y = %d,blockIdx.x= %d\n", (int)threadIdx.x, (int)threadIdx.y, (int) blockIdx.x);
-		printGeometryCorrection(&geometry_correction);
-		printExtrinsicCorrection(&extrinsic_corr);
+		printGeometryCorrection(&geometry_correction, num_cams);
+		printExtrinsicCorrection(&extrinsic_corr,num_cams);
 	}
 	__syncthreads();// __syncwarp();
 #endif // DEBUG21
@@ -852,7 +852,7 @@ inline __device__ float getRByRDist(float rDist,
 	return result;
 }
 
-__device__ void printGeometryCorrection(struct gc * g){
+__device__ void printGeometryCorrection(struct gc * g, int num_cams){
 #ifndef JCUDA
 	printf("\nGeometry Correction\n------------------\n");
 	printf("%22s: %f\n","pixelCorrectionWidth",  g->pixelCorrectionWidth);
@@ -874,39 +874,58 @@ __device__ void printGeometryCorrection(struct gc * g){
 	printf("%22s: %f\n","elevation",   g->elevation);
 	printf("%22s: %f\n","heading",     g->heading);
 
-	printf("%22s: %f, %f, %f, %f \n","forward", g->forward[0], g->forward[1], g->forward[2], g->forward[3]);
-	printf("%22s: %f, %f, %f, %f \n","right",   g->right[0],   g->right[1],   g->right[2],   g->right[3]);
-	printf("%22s: %f, %f, %f, %f \n","height",  g->height[0],  g->height[1],  g->height[2],  g->height[3]);
-	printf("%22s: %f, %f, %f, %f \n","roll",    g->roll[0],    g->roll[1],    g->roll[2],    g->roll[3]);
-	printf("%22s: %f, %f \n",        "pXY0[0]", g->pXY0[0][0], g->pXY0[0][1]);
-	printf("%22s: %f, %f \n",        "pXY0[1]", g->pXY0[1][0], g->pXY0[1][1]);
-	printf("%22s: %f, %f \n",        "pXY0[2]", g->pXY0[2][0], g->pXY0[2][1]);
-	printf("%22s: %f, %f \n",        "pXY0[3]", g->pXY0[3][0], g->pXY0[3][1]);
+//	printf("%22s: %f, %f, %f, %f \n","forward", g->forward[0], g->forward[1], g->forward[2], g->forward[3]);
+//	printf("%22s: %f, %f, %f, %f \n","right",   g->right[0],   g->right[1],   g->right[2],   g->right[3]);
+//	printf("%22s: %f, %f, %f, %f \n","height",  g->height[0],  g->height[1],  g->height[2],  g->height[3]);
+//	printf("%22s: %f, %f, %f, %f \n","roll",    g->roll[0],    g->roll[1],    g->roll[2],    g->roll[3]);
+//	printf("%22s: %f, %f \n",        "pXY0[0]", g->pXY0[0][0], g->pXY0[0][1]);
+//	printf("%22s: %f, %f \n",        "pXY0[1]", g->pXY0[1][0], g->pXY0[1][1]);
+//	printf("%22s: %f, %f \n",        "pXY0[2]", g->pXY0[2][0], g->pXY0[2][1]);
+//	printf("%22s: %f, %f \n",        "pXY0[3]", g->pXY0[3][0], g->pXY0[3][1]);
+	printf("%22s:","forward"); for (int ncam = 0; ncam < num_cams; ncam++) printf(" %f,", g->forward[ncam]); printf("\n");
+	printf("%22s:","right");   for (int ncam = 0; ncam < num_cams; ncam++) printf(" %f,", g->right  [ncam]); printf("\n");
+	printf("%22s:","height");  for (int ncam = 0; ncam < num_cams; ncam++) printf(" %f,", g->height [ncam]); printf("\n");
+	printf("%22s:","roll");    for (int ncam = 0; ncam < num_cams; ncam++) printf(" %f,", g->roll   [ncam]); printf("\n");
+	for (int ncam = 0; ncam < num_cams; ncam++) {
+		printf("%19s%2d]: %f, %f \n", "pXY0[",ncam, g->pXY0[ncam][0], g->pXY0[ncam][1]);
+	}
 
 	printf("%22s: %f\n","common_right",   g->common_right);
 	printf("%22s: %f\n","common_forward", g->common_forward);
 	printf("%22s: %f\n","common_height",  g->common_height);
 	printf("%22s: %f\n","common_roll",    g->common_roll);
 
-	printf("%22s: x=%f, y=%f\n","rXY[0]", g->rXY[0][0], g->rXY[0][1]);
-	printf("%22s: x=%f, y=%f\n","rXY[1]", g->rXY[1][0], g->rXY[1][1]);
-	printf("%22s: x=%f, y=%f\n","rXY[2]", g->rXY[2][0], g->rXY[2][1]);
-	printf("%22s: x=%f, y=%f\n","rXY[3]", g->rXY[3][0], g->rXY[3][1]);
-
+//	printf("%22s: x=%f, y=%f\n","rXY[0]", g->rXY[0][0], g->rXY[0][1]);
+//	printf("%22s: x=%f, y=%f\n","rXY[1]", g->rXY[1][0], g->rXY[1][1]);
+//	printf("%22s: x=%f, y=%f\n","rXY[2]", g->rXY[2][0], g->rXY[2][1]);
+//	printf("%22s: x=%f, y=%f\n","rXY[3]", g->rXY[3][0], g->rXY[3][1]);
+	for (int ncam = 0; ncam < num_cams; ncam++) {
+		printf("%19s%2d]: %f, %f \n", "rXY[", ncam, g->rXY[ncam][0], g->rXY[ncam][1]);
+	}
 	printf("%22s: %f\n","cameraRadius",    g->cameraRadius);
 	printf("%22s: %f\n","disparityRadius", g->disparityRadius);
-	printf("%22s: %f, %f, %f, %f \n","woi_tops", g->woi_tops[0], g->woi_tops[1], g->woi_tops[2], g->woi_tops[3]);
+
+//	printf("%22s: %f, %f, %f, %f \n","woi_tops", g->woi_tops[0], g->woi_tops[1], g->woi_tops[2], g->woi_tops[3]);
+	printf("%22s:","woi_tops");    for (int ncam = 0; ncam < num_cams; ncam++) printf(" %f,", g->woi_tops[ncam]); printf("\n");
+
 #endif //ifndef JCUDA
 }
 
-__device__ void printExtrinsicCorrection(corr_vector * cv)
+__device__ void printExtrinsicCorrection(corr_vector * cv, int num_cams)
 {
 #ifndef JCUDA
 	printf("\nExtrinsic Correction Vector\n---------------------------\n");
-	printf("%22s: %f, %f, %f\n",     "tilt",    cv->tilt[0],    cv->tilt[1],    cv->tilt[2]);
-	printf("%22s: %f, %f, %f\n",     "azimuth", cv->azimuth[0], cv->azimuth[1], cv->azimuth[2]);
-	printf("%22s: %f, %f, %f, %f\n", "roll",    cv->roll[0],    cv->roll[1],    cv->roll[2],      cv->roll[3]);
-	printf("%22s: %f, %f, %f\n",     "zoom",    cv->zoom[0],    cv->zoom[1],    cv->zoom[2]);
+//	printf("%22s: %f, %f, %f\n",     "tilt",    cv->tilt[0],    cv->tilt[1],    cv->tilt[2]);
+//	printf("%22s: %f, %f, %f\n",     "azimuth", cv->azimuth[0], cv->azimuth[1], cv->azimuth[2]);
+//	printf("%22s: %f, %f, %f, %f\n", "roll",    cv->roll[0],    cv->roll[1],    cv->roll[2],      cv->roll[3]);
+//	printf("%22s: %f, %f, %f\n",     "zoom",    cv->zoom[0],    cv->zoom[1],    cv->zoom[2]);
+
+	printf("%22s:","tilt");    for (int ncam = 0; ncam < (num_cams-1); ncam++) printf(" %f,", cv->tilt[ncam]);    printf("\n");
+	printf("%22s:","azimuth"); for (int ncam = 0; ncam < (num_cams-1); ncam++) printf(" %f,", cv->azimuth[ncam]); printf("\n");
+	printf("%22s:","roll");    for (int ncam = 0; ncam <  num_cams;    ncam++) printf(" %f,", cv->roll[ncam]);    printf("\n");
+	printf("%22s:","zoom");    for (int ncam = 0; ncam < (num_cams-1); ncam++) printf(" %f,", cv->zoom[ncam]);    printf("\n");
+
+
 
 	printf("%22s: %f(t), %f(a), %f(r)\n",     "imu_rot",    cv->imu_rot[0],    cv->imu_rot[1],    cv->imu_rot[2]);
 	printf("%22s: %f(x), %f(y), %f(z)\n",     "imu_move",    cv->imu_move[0],    cv->imu_move[1],    cv->imu_move[2]);

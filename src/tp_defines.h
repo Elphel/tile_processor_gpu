@@ -41,7 +41,7 @@
 #ifndef JCUDA
 #include <stdio.h>
 #define THREADSX              (DTT_SIZE)
-#define TEST_LWIR                      0
+#define TEST_LWIR                      1
 #define NUM_CAMS                      16 // now maximal number of cameras
 //#define NUM_PAIRS                      6
 #define NUM_COLORS                     1 //3
@@ -86,7 +86,7 @@
 
 #define THREADS_DYNAMIC_BITS           5 // treads in block for CDP creation of the texture list
 
-#define DBG_DISPARITY               0.0 // 56.0//   0.0 // 56.0 // disparity for which to calculate offsets (not needed in Java)
+#define DBG_DISPARITY                  0.0 // 56.0//   0.0 // 56.0 // disparity for which to calculate offsets (not needed in Java)
 #define RBYRDIST_LEN                5001   // for doubles 10001 - floats   // length of rByRDist to allocate shared memory
 #define RBYRDIST_STEP                  0.0004 // for doubles, 0.0002 - floats // to fit into GPU shared memory (was 0.001);
 #define TILES_PER_BLOCK_GEOM          (32/NUM_CAMS)   // each tile has NUM_CAMS threads
@@ -105,12 +105,16 @@
 
 //#define DBG_TILE_X     40
 //#define DBG_TILE_Y     80
-#define DBG_TILE_X     32 // 162 // 151 // 161 // 49
-#define DBG_TILE_Y     88 // 121 // 69  // 111 // 66
-
-#define DBG_TILE    (DBG_TILE_Y * 324 + DBG_TILE_X)
+#if TEST_LWIR
+	#define DBG_TILE_X     32 // 162 // 151 // 161 // 49
+	#define DBG_TILE_Y     36 // 88 // 121 // 69  // 111 // 66
+	#define DBG_TILE    (DBG_TILE_Y * 80 + DBG_TILE_X)
+#else
+	#define DBG_TILE_X     32 // 162 // 151 // 161 // 49
+	#define DBG_TILE_Y     88 // 121 // 69  // 111 // 66
+	#define DBG_TILE    (DBG_TILE_Y * 324 + DBG_TILE_X)
+#endif
 #undef DBG_MARK_DBG_TILE
-
 //#undef DBG_TILE
 
 //#undef HAS_PRINTF
@@ -137,6 +141,7 @@
 //#define DEBUG20 1
 
 #if (DBG_TILE_X >= 0) && (DBG_TILE_Y >= 0)
+#define DEBUG20 1 // Geometry Correction
 #define DEBUG21 1 // Geometry Correction
 //#define DEBUG210 1
 
