@@ -497,6 +497,7 @@ extern "C" __global__ void get_tiles_offsets(
 #ifdef DEBUG21
 	if ((ncam == DBG_CAM)  && (task_num == DBG_TILE)){
 		printf("\nTile = %d, camera= %d\n", task_num, ncam);
+		printf("TargetDisparity = %f\n", disparity);
 		printf("tileX = %d,  tileY = %d\n", tileX, tileY);
 		printf("px = %f,  py = %f\n", px, py);
 		printf("pXcd = %f,  pYcd = %f\n", pXcd, pYcd);
@@ -562,10 +563,10 @@ extern "C" __global__ void get_tiles_offsets(
 	__syncthreads();
 	// Each thread re-calculate same sum
 	float lines_avg = 0;
-	for (int i = 0; i < NUM_CAMS; i ++){
+	for (int i = 0; i < num_cams; i ++){
 		lines_avg += pY_offsets[threadIdx.y][i];
 	}
-	lines_avg *= (1.0/NUM_CAMS);
+	lines_avg *= (1.0/num_cams);
 	// used when calculating derivatives, TODO: combine calculations !
 	float pY_offset = pY_offsets[threadIdx.y][ncam] - lines_avg;
 #ifdef DEBUG21
@@ -577,7 +578,7 @@ extern "C" __global__ void get_tiles_offsets(
 		printf("rD2rND = %f\n", rD2rND);
 		printf("pXid = %f,  pYid = %f\n", pXid, pYid);
 		printf("pXY[0] = %f,  pXY[1] = %f\n", pXY[0], pXY[1]); // OK
-		printf("lines_avg = %f,  pY_offset = %f\n", lines_avg, pY_offset);
+		printf("lines_avg = %f,  pY_offset = %f\n", lines_avg, pY_offset); // *
 	}
 	__syncthreads();// __syncwarp();
 #endif // DEBUG21
@@ -688,7 +689,7 @@ extern "C" __global__ void get_tiles_offsets(
 ///	gpu_tasks[task_num].disp_dist[ncam][1] = disp_dist[1];
 ///	gpu_tasks[task_num].disp_dist[ncam][2] = disp_dist[2];
 ///	gpu_tasks[task_num].disp_dist[ncam][3] = disp_dist[3];
-	float * disp_dist_p = gpu_ftasks +  task_size * task_num + 3 + ncam * 4; //  ncam = threadIdx.x, so each thread will have different offset
+	float * disp_dist_p = gpu_ftasks +  task_size * task_num + 3 + num_cams* 2 + ncam * 4; //  ncam = threadIdx.x, so each thread will have different offset
 	*(disp_dist_p++) = disp_dist[0]; // global memory
 	*(disp_dist_p++) = disp_dist[1];
 	*(disp_dist_p++) = disp_dist[2];
@@ -746,10 +747,12 @@ extern "C" __global__ void get_tiles_offsets(
 
 		}
 	}
-	// copy results to global memory pXY,  disp_dist
+	// copy results to global memory pXY,  disp_dist (already copied)
 //	gpu_tasks[task_num].xy[ncam][0] = pXY[0];
 //	gpu_tasks[task_num].xy[ncam][1] = pXY[1];
-	float * tile_xy_p = gpu_ftasks +  task_size * task_num + 3 + num_cams * 4 + ncam * 2; //  ncam = threadIdx.x, so each thread will have different offset
+//	float * tile_xy_p = gpu_ftasks +  task_size * task_num + 3 + num_cams * 4 + ncam * 2; //  ncam = threadIdx.x, so each thread will have different offset
+	// .xy goes right after 3 commonn (tak, txy and target_disparity
+	float * tile_xy_p = gpu_ftasks +  task_size * task_num + 3 + ncam * 2; //  ncam = threadIdx.x, so each thread will have different offset
 	*(tile_xy_p++) = pXY[0]; // global memory
 	*(tile_xy_p++) = pXY[1]; // global memory
 }

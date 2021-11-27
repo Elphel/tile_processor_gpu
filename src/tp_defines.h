@@ -86,7 +86,7 @@
 
 #define THREADS_DYNAMIC_BITS           5 // treads in block for CDP creation of the texture list
 
-#define DBG_DISPARITY               56.0//   0.0 // 56.0 // disparity for which to calculate offsets (not needed in Java)
+#define DBG_DISPARITY               0.0 // 56.0//   0.0 // 56.0 // disparity for which to calculate offsets (not needed in Java)
 #define RBYRDIST_LEN                5001   // for doubles 10001 - floats   // length of rByRDist to allocate shared memory
 #define RBYRDIST_STEP                  0.0004 // for doubles, 0.0002 - floats // to fit into GPU shared memory (was 0.001);
 #define TILES_PER_BLOCK_GEOM          (32/NUM_CAMS)   // each tile has NUM_CAMS threads
