@@ -34,7 +34,7 @@
 #define NOCORR_TD
 #define NOTEXTURES
 #define NOTEXTURE_RGBA
-
+#define SAVE_CLT
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -330,7 +330,7 @@ int main(int argc, char **argv)
 			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn15.portsxy"};
 
 //#ifndef DBG_TILE
-    /*
+#ifdef SAVE_CLT
     const char* ports_clt_file[] = { // never referenced
     		"/home/eyesis/git/tile_processor_gpu/clt/aux_chn0.clt",
 			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn1.clt",
@@ -348,7 +348,8 @@ int main(int argc, char **argv)
 			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn13.clt",
 			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn14.clt",
 			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn15.clt"};
-*/
+
+#endif
     const char* result_rbg_file[] = {
     		"/home/eyesis/git/tile_processor_gpu/clt/aux_chn0.rbg",
 			"/home/eyesis/git/tile_processor_gpu/clt/aux_chn1.rbg",
@@ -401,15 +402,13 @@ int main(int argc, char **argv)
 			"/home/eyesis/git/tile_processor_gpu/clt/main_chn1.portsxy",
 			"/home/eyesis/git/tile_processor_gpu/clt/main_chn2.portsxy",
 			"/home/eyesis/git/tile_processor_gpu/clt/main_chn3.portsxy"};
-
-//#ifndef DBG_TILE
-    /*
+#ifdef SAVE_CLT
     const char* ports_clt_file[] = { // never referenced
     		"/home/eyesis/git/tile_processor_gpu/clt/main_chn0.clt",
 			"/home/eyesis/git/tile_processor_gpu/clt/main_chn1.clt",
 			"/home/eyesis/git/tile_processor_gpu/clt/main_chn2.clt",
 			"/home/eyesis/git/tile_processor_gpu/clt/main_chn3.clt"};
-*/
+#endif
     const char* result_rbg_file[] = {
     		"/home/eyesis/git/tile_processor_gpu/clt/main_chn0.rbg",
 			"/home/eyesis/git/tile_processor_gpu/clt/main_chn1.rbg",
@@ -1133,12 +1132,12 @@ int main(int argc, char **argv)
 				gpu_clt_h[ncam],
 				rslt_size * sizeof(float),
     			cudaMemcpyDeviceToHost));
-#ifndef DBG_TILE
+//#ifndef DBG_TILE
         printf("Writing CLT data to %s\n",  ports_clt_file[ncam]);
     	writeFloatsToFile(cpu_clt, // float *       data, // allocated array
     			rslt_size, // int           size, // length in elements
 				ports_clt_file[ncam]); // 			   const char *  path) // file path
-#endif
+//#endif
     }
 #endif
 

@@ -140,11 +140,12 @@
 // geom
 //#define DEBUG20 1
 
+
 #if (DBG_TILE_X >= 0) && (DBG_TILE_Y >= 0)
 #define DEBUG20 1 // Geometry Correction
 #define DEBUG21 1 // Geometry Correction
 //#define DEBUG210 1
-
+#define DEBUG30 1
 //#define DEBUG22 1
 //#define DEBUG23 1
 
