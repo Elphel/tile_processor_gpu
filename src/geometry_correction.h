@@ -41,7 +41,6 @@
 #include "tp_defines.h"
 #endif
 
-#define get_task_size(x) (sizeof(struct tp_task)/sizeof(float) - 6 * (NUM_CAMS - x))
 
 #define NVRTC_BUG 1
 #ifndef M_PI
@@ -63,10 +62,16 @@ struct tp_task {
 		unsigned short sxy[2];
 	};
 	float target_disparity;
+	float centerXY[2];          // "ideal" centerX, centerY to use instead of the uniform tile centers (txy) for interscene accumulation
+	                            // if isnan(centerXY[0]), then txy is used to calculate centerXY and all xy
 	float xy[NUM_CAMS][2];
 //	float target_disparity;
 	float disp_dist[NUM_CAMS][4]; // calculated with getPortsCoordinates()
 };
+
+#define get_task_size(x) (sizeof(struct tp_task)/sizeof(float) - 6 * (NUM_CAMS - x))
+#define tp_task_xy_offset 5
+#define tp_task_centerXY_offset 3
 
 struct corr_vector{
 	float tilt    [NUM_CAMS-1]; // 0..2
@@ -145,6 +150,7 @@ struct gc {
 };
 #define RAD_COEFF_LEN 7
 extern "C" __global__ void get_tiles_offsets(
+		int                  uniform_grid, //==0: use provided centers (as for interscene) , !=0 calculate uniform grid
 		int                  num_cams,
 //		struct tp_task     * gpu_tasks,
 		float              * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
@@ -155,6 +161,7 @@ extern "C" __global__ void get_tiles_offsets(
 		trot_deriv   * gpu_rot_deriv);
 
 extern "C" __global__ void calculate_tiles_offsets(
+		int                  uniform_grid, //==0: use provided centers (as for interscene) , !=0 calculate uniform grid
 		int                  num_cams,
 		float              * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
 //		struct tp_task     * gpu_tasks,

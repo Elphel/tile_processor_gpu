@@ -307,6 +307,7 @@ extern "C" __global__ void calc_rot_deriv(
 
 
 extern "C" __global__ void calculate_tiles_offsets(
+		int                  uniform_grid, //==0: use provided centers (as for interscene) , !=0 calculate uniform grid
 		int                  num_cams,
 		float              * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
 //		struct tp_task     * gpu_tasks,
@@ -325,6 +326,7 @@ extern "C" __global__ void calculate_tiles_offsets(
 
 	if (threadIdx.x == 0) { // always 1
     	get_tiles_offsets<<<grid_geom,threads_geom>>> (
+    			uniform_grid,            // int                  uniform_grid, //==0: use provided centers (as for interscene) , !=0 calculate uniform grid
     			num_cams,                // int                  num_cams,
 				gpu_ftasks,              // float              * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
 //    			gpu_tasks,               // struct tp_task     * gpu_tasks,
@@ -347,6 +349,7 @@ extern "C" __global__ void calculate_tiles_offsets(
  */
 
 extern "C" __global__ void get_tiles_offsets(
+		int                  uniform_grid, //==0: use provided centers (as for interscene) , !=0 calculate uniform grid
 		int                  num_cams,
 //		struct tp_task     * gpu_tasks,
 		float              * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
@@ -457,19 +460,30 @@ extern "C" __global__ void get_tiles_offsets(
 	// common code, calculated in parallel
 ///	int cxy = gpu_tasks[task_num].txy;
 ///	float disparity = gpu_tasks[task_num].target_disparity;
-	int cxy =  *(int *) (gpu_ftasks +  task_size * task_num + 1);
 	float disparity = * (gpu_ftasks +  task_size * task_num + 2);
+	float *centerXY =    gpu_ftasks +  task_size * task_num + tp_task_centerXY_offset;
+	float px =  *(centerXY);
+	float py =  *(centerXY + 1);
+	int cxy =  *(int *) (gpu_ftasks +  task_size * task_num + 1);
 	int tileX = (cxy & 0xffff);
 	int tileY = (cxy >> 16);
+
+//	if (isnan(px)) {
+//	if (__float_as_int(px) == 0x7fffffff) {
+	if (uniform_grid) {
 #ifdef DEBUG23
-	if ((ncam == 0) && (tileX == DBG_TILE_X) && (tileY == DBG_TILE_Y)){
-		printf ("\n  get_tiles_offsets(): Debugging tileX=%d, tileY=%d, ncam = %d\n", tileX,tileY,ncam);
-		printf("\n");
-		__syncthreads();
-	}
+		if ((ncam == 0) && (tileX == DBG_TILE_X) && (tileY == DBG_TILE_Y)){
+			printf ("\n  get_tiles_offsets(): Debugging tileX=%d, tileY=%d, ncam = %d\n", tileX,tileY,ncam);
+			printf("\n");
+			__syncthreads();
+		}
 #endif //#ifdef DEBUG23
-	float px = tileX * DTT_SIZE + DTT_SIZE/2; //  - shiftX;
-	float py = tileY * DTT_SIZE + DTT_SIZE/2; //  - shiftY;
+		px = tileX * DTT_SIZE + DTT_SIZE/2; //  - shiftX;
+		py = tileY * DTT_SIZE + DTT_SIZE/2; //  - shiftY;
+		*(centerXY) =     px;
+		*(centerXY + 1) = py;
+	}
+	__syncthreads();
 
 	float pXcd = px - 0.5 * geometry_correction.pixelCorrectionWidth;
 	float pYcd = py - 0.5 * geometry_correction.pixelCorrectionHeight;
@@ -496,15 +510,17 @@ extern "C" __global__ void get_tiles_offsets(
 
 #ifdef DEBUG21
 	if ((ncam == DBG_CAM)  && (task_num == DBG_TILE)){
-		printf("\nTile = %d, camera= %d\n", task_num, ncam);
-		printf("TargetDisparity = %f\n", disparity);
-		printf("tileX = %d,  tileY = %d\n", tileX, tileY);
-		printf("px = %f,  py = %f\n", px, py);
-		printf("pXcd = %f,  pYcd = %f\n", pXcd, pYcd);
-		printf("rXY[0] = %f,  rXY[1] = %f\n", rXY[0], rXY[1]);
-		printf("rD = %f,  rND2R = %f\n", rD, rND2R);
-		printf("pXc = %f,  pYc = %f\n", pXc, pYc);
-		printf("fl_pix = %f,  ri_scale = %f\n", fl_pix, ri_scale);
+		printf("\nuniform_grid=%d\n",                  uniform_grid);
+		printf("Tile = %d, camera= %d\n",              task_num, ncam);
+		printf("TargetDisparity = %f\n",               disparity);
+		printf("tileX = %d,  tileY = %d\n",            tileX, tileY);
+		printf("px = %f,  py = %f\n",                  px, py);
+		printf("centerXY[0] = %f,  centerXY[1] = %f\n", *(centerXY), *(centerXY + 1));
+		printf("pXcd = %f,  pYcd = %f\n",              pXcd, pYcd);
+		printf("rXY[0] = %f,  rXY[1] = %f\n",          rXY[0], rXY[1]);
+		printf("rD = %f,  rND2R = %f\n",               rD, rND2R);
+		printf("pXc = %f,  pYc = %f\n",                pXc, pYc);
+		printf("fl_pix = %f,  ri_scale = %f\n",        fl_pix, ri_scale);
 		printf("xyz[0] = %f, xyz[1] = %f, xyz[2] = %f\n", xyz[0],xyz[1],xyz[2]);
 	}
 	__syncthreads();// __syncwarp();
@@ -689,7 +705,7 @@ extern "C" __global__ void get_tiles_offsets(
 ///	gpu_tasks[task_num].disp_dist[ncam][1] = disp_dist[1];
 ///	gpu_tasks[task_num].disp_dist[ncam][2] = disp_dist[2];
 ///	gpu_tasks[task_num].disp_dist[ncam][3] = disp_dist[3];
-	float * disp_dist_p = gpu_ftasks +  task_size * task_num + 3 + num_cams* 2 + ncam * 4; //  ncam = threadIdx.x, so each thread will have different offset
+	float * disp_dist_p = gpu_ftasks +  task_size * task_num + tp_task_xy_offset + num_cams* 2 + ncam * 4; //  ncam = threadIdx.x, so each thread will have different offset
 	*(disp_dist_p++) = disp_dist[0]; // global memory
 	*(disp_dist_p++) = disp_dist[1];
 	*(disp_dist_p++) = disp_dist[2];
@@ -752,7 +768,7 @@ extern "C" __global__ void get_tiles_offsets(
 //	gpu_tasks[task_num].xy[ncam][1] = pXY[1];
 //	float * tile_xy_p = gpu_ftasks +  task_size * task_num + 3 + num_cams * 4 + ncam * 2; //  ncam = threadIdx.x, so each thread will have different offset
 	// .xy goes right after 3 commonn (tak, txy and target_disparity
-	float * tile_xy_p = gpu_ftasks +  task_size * task_num + 3 + ncam * 2; //  ncam = threadIdx.x, so each thread will have different offset
+	float * tile_xy_p = gpu_ftasks +  task_size * task_num + tp_task_xy_offset + ncam * 2; //  ncam = threadIdx.x, so each thread will have different offset
 	*(tile_xy_p++) = pXY[0]; // global memory
 	*(tile_xy_p++) = pXY[1]; // global memory
 }

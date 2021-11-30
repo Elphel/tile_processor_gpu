@@ -2697,9 +2697,9 @@ __global__ void convert_correct_tiles(
 	int thread0 =  threadIdx.x & 1; // 0,1
 	int thread12 = threadIdx.x >>1; // now 0..3 (total number ==  (DTT_SIZE), will not change
 
-	float * tp = tp0 + 3 + threadIdx.x;
+	float * tp = tp0 + tp_task_xy_offset + threadIdx.x;
 	if (thread12 < num_cams) {
-		tt[tile_in_block].xy[thread12][thread0] = *(tp); // gpu_task -> xy[thread12][thread0];
+		tt[tile_in_block].xy[thread12][thread0] = *(tp);        // gpu_task -> xy[thread12][thread0];
 	}
 	if (num_cams > 4){ // was unlikely, now 16
 		for (int nc0 = 4; nc0 < num_cams; nc0 += 4){
@@ -2714,9 +2714,9 @@ __global__ void convert_correct_tiles(
 	if (threadIdx.x == 0){ // only one thread calculates, others - wait
 		tt[tile_in_block].task = *(int *)     (tp0++);    // get first integer value
 		tt[tile_in_block].txy =  *(int *)     (tp0++);    // get second integer value
-		tt[tile_in_block].target_disparity = *(tp0++); //
+		tt[tile_in_block].target_disparity = *(tp0++);    //
 	}
-
+	// float centerXY[2] is not used/copied here
 
      __syncthreads();// __syncwarp();
     __shared__ float clt_tile        [TILES_PER_BLOCK][4][DTT_SIZE][DTT_SIZE1];
@@ -2732,7 +2732,12 @@ __global__ void convert_correct_tiles(
     for (int ncam = 0; ncam <  num_cams; ncam++){
     	for (int color = 0; color <  num_colors; color++){
     		convertCorrectTile(
-    				num_colors + (((task_num == DBG_TILE)&& (ncam == 0)) ? 16:0),                      // int                   num_colors, //*
+    				// TODO: remove debug when done
+#ifdef DBG_TILE
+    				num_colors  + (((task_num == DBG_TILE)&& (ncam == 0)) ? 16:0),                      // int                   num_colors, //*
+#else
+    				num_colors,                      // int                   num_colors, //*
+#endif
     				(struct CltExtra*)(gpu_kernel_offsets[ncam]),        // struct CltExtra* gpu_kernel_offsets,
 					gpu_kernels[ncam],               // float           * gpu_kernels,
 					gpu_images[ncam],                // float           * gpu_images,
@@ -4251,16 +4256,10 @@ __device__ void convertCorrectTile(
     		dtt_buf +=    DTT_SIZE1;
     	}
     	__syncthreads();// __syncwarp();
-
-
-		int colorX = color; // 1; // color; // 2; // 0 - OK, 1 - OK, 2 - wrong
-    	int colorY = color; // 1; // color; // 2; // 0 - OK, 1 - OK, 2 - wrong
-    	int color0 = colorX & 1;
-    	int color1 = (colorX >>1) & 1;
+    	int color0 = color & 1;
+    	int color1 = (color >>1) & 1;
 
     	for (int gpass = 0; gpass < (color1 + 1); gpass++) { // Only once for R, B, twice - for G
-//       	for (int gpass = 0; gpass < 1; gpass++) { // Only once for R, B, twice - for G
-//    	for (int gpass = 1; gpass < (color1 + 1); gpass++) { // Only once for R, B, twice - for G
     		int col_tl = int_topleft[0]; //  + (threadIdx.x << 1);
     		int row_tl = int_topleft[1];
     		// for red, blue and green, pass 0
@@ -4325,7 +4324,7 @@ __device__ void convertCorrectTile(
     	}
     	__syncthreads();// __syncwarp();
 #endif
-    	if (colorY == BAYER_GREEN) {
+    	if (color == BAYER_GREEN) {
     		// reduce 4 green DTT buffers into 2 (so free future rotated green that were borrowed)
     		float *dtt_buf =  clt_tile + threadIdx.x;
     		float *dtt_buf1 = dtt_buf+ (2 * DTT_SIZE1 * DTT_SIZE); // ((float *) clt_tile[2]) + threadIdx.x;
@@ -4347,7 +4346,7 @@ __device__ void convertCorrectTile(
 #endif
     	dttiv_color_2d(
     			clt_tile,
-				colorY);
+				color);
 #ifdef DEBUG30
         if (dbg_tile && (threadIdx.x) == 0){
     		printf("\nDTT Tiles after vertical pass (both passes), color = %d\n",color);
@@ -4361,8 +4360,8 @@ __device__ void convertCorrectTile(
     	int   negate; // , dst_inc;
 
     	// Replicate horizontally (for R and B only):
-    	if (colorY != BAYER_GREEN) {
-    		negate = 1-(((int_topleft[0] & 1) ^ (BAYER_RED_COL ^ colorY)) << 1); // +1/-1
+    	if (color != BAYER_GREEN) {
+    		negate = 1-(((int_topleft[0] & 1) ^ (BAYER_RED_COL ^ color)) << 1); // +1/-1
     		src = clt_tile + threadIdx.x; // &clt_tile[0][0][threadIdx.x    ];
     		dst = clt_tile + (DTT_SIZE1 * DTT_SIZE) + (threadIdx.x ^ 7); // &clt_tile[1][0][threadIdx.x ^ 7];
 #pragma unroll
@@ -4382,7 +4381,7 @@ __device__ void convertCorrectTile(
 
     	}
     	// replicate all colors down diagonal
-    	negate = 1-(((int_topleft[0] & 1) ^ (int_topleft[1] & 1) ^ (BAYER_RED_COL ^ BAYER_RED_ROW ^ (colorY >> 1))) << 1); // +1/-1 // 1 -
+    	negate = 1-(((int_topleft[0] & 1) ^ (int_topleft[1] & 1) ^ (BAYER_RED_COL ^ BAYER_RED_ROW ^ (color >> 1))) << 1); // +1/-1 // 1 -
     	// CC -> SS
     	src = clt_tile + threadIdx.x; // &clt_tile[0][0][threadIdx.x    ];
     	dst = clt_tile + (DTT_SIZE1 * (DTT_SIZE * 3 + 7)) +  (threadIdx.x ^ 7); // &clt_tile[3][7][threadIdx.x ^ 7];

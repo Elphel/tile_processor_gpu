@@ -489,7 +489,7 @@ int main(int argc, char **argv)
 ///    static struct tp_task     task_data   [TILESX*TILESY]; // maximal length - each tile
 ///    static struct tp_task     task_data1  [TILESX*TILESY]; // maximal length - each tile
 
-    float * ftask_data  = (float *) malloc(TILESX * TILESY * task_size * sizeof(float));
+    float * ftask_data  =  (float *) malloc(TILESX * TILESY * task_size * sizeof(float));
     float * ftask_data1  = (float *) malloc(TILESX * TILESY * task_size * sizeof(float));
 
     trot_deriv  rot_deriv;
@@ -691,6 +691,7 @@ int main(int argc, char **argv)
             *(tp++) =  *(float *) &task_task;
             *(tp++) =  *(float *) &task_txy;
             *(tp++) =  task_target_disparity;
+            tp += 2; // skip centerX, centerY
             for (int ncam = 0; ncam < num_cams; ncam++) {
             	*(tp++) = tile_coords_h[ncam][nt][0];
             	*(tp++) = tile_coords_h[ncam][nt][1];
@@ -982,6 +983,7 @@ int main(int argc, char **argv)
 				gpu_rot_deriv);          // union trot_deriv   * gpu_rot_deriv);
 				*/
     	calculate_tiles_offsets<<<1,1>>> (
+    			1,                       // int                  uniform_grid, //==0: use provided centers (as for interscene) , !=0 calculate uniform grid
     			num_cams,                // int                  num_cams,
 				gpu_ftasks,              // float              * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
 //    			gpu_tasks,               // struct tp_task     * gpu_tasks,
@@ -1037,15 +1039,15 @@ int main(int argc, char **argv)
     //  for (int ncam = 0; ncam < NUM_CAMS; ncam++){
         for (int ncam = 0; ncam < num_cams; ncam++){
             printf("camera %d pX old %f new %f diff = %f\n", ncam,
-            		 *(ftask_data  + task_size * DBG_TILE + 3 + 2*ncam + 0),
-            		 *(ftask_data1 + task_size * DBG_TILE + 3 + 2*ncam + 0),
-            		 (*(ftask_data + task_size * DBG_TILE + 3 + 2*ncam + 0)) -
-            		 (*(ftask_data1 + task_size * DBG_TILE + 3 + 2*ncam + 0)));
+            		 *(ftask_data  + task_size * DBG_TILE + tp_task_xy_offset + 2*ncam + 0),
+            		 *(ftask_data1 + task_size * DBG_TILE + tp_task_xy_offset + 2*ncam + 0),
+            		 (*(ftask_data + task_size * DBG_TILE + tp_task_xy_offset + 2*ncam + 0)) -
+            		 (*(ftask_data1 + task_size * DBG_TILE + tp_task_xy_offset + 2*ncam + 0)));
             printf("camera %d pY old %f new %f diff = %f\n", ncam,
-           		 *(ftask_data  + task_size * DBG_TILE + 3 + 2*ncam + 1),
-           		 *(ftask_data1 + task_size * DBG_TILE + 3 + 2*ncam + 1),
-           		 (*(ftask_data + task_size * DBG_TILE + 3 + 2*ncam + 1)) -
-           		 (*(ftask_data1 + task_size * DBG_TILE + 3 + 2*ncam + 1)));
+           		 *(ftask_data  + task_size * DBG_TILE + tp_task_xy_offset + 2*ncam + 1),
+           		 *(ftask_data1 + task_size * DBG_TILE + tp_task_xy_offset + 2*ncam + 1),
+           		 (*(ftask_data + task_size * DBG_TILE + tp_task_xy_offset + 2*ncam + 1)) -
+           		 (*(ftask_data1 + task_size * DBG_TILE + tp_task_xy_offset + 2*ncam + 1)));
         }
 
 
