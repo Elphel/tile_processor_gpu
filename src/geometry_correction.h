@@ -65,7 +65,6 @@ struct tp_task {
 	float centerXY[2];          // "ideal" centerX, centerY to use instead of the uniform tile centers (txy) for interscene accumulation
 	                            // if isnan(centerXY[0]), then txy is used to calculate centerXY and all xy
 	float xy[NUM_CAMS][2];
-//	float target_disparity;
 	float disp_dist[NUM_CAMS][4]; // calculated with getPortsCoordinates()
 };
 

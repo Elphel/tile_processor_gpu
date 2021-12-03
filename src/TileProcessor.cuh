@@ -1288,7 +1288,7 @@ extern "C" __global__ void correlate2D_inner(
         // copy clt (frequency domain data)
         float * clt_tile1 = ((float *) clt_tiles1) +  corr_in_block * (4 * DTT_SIZE * DTT_SIZE1);
         float * clt_tile2 = ((float *) clt_tiles2) +  corr_in_block * (4 * DTT_SIZE * DTT_SIZE1);
-        int offs = (tile_num * NUM_COLORS + color) * (4 * DTT_SIZE * DTT_SIZE) + threadIdx.x;
+        int offs = (tile_num * colors + color) * (4 * DTT_SIZE * DTT_SIZE) + threadIdx.x;
         float * gpu_tile1 = ((float *) gpu_clt[cam1]) + offs;
         float * gpu_tile2 = ((float *) gpu_clt[cam2]) + offs;
 		float * clt_tile1i = clt_tile1 + threadIdx.x;
@@ -1892,7 +1892,6 @@ extern "C" __global__ void corr2D_normalize_inner(
  *
  * @param num_cams             number of cameras
  * @param gpu_ftasks           flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
- //* @param gpu_tasks            array of per-tile tasks (struct tp_task)
  * @param num_tiles            number of tiles int gpu_tasks array prepared for processing
  * @param gpu_texture_indices  allocated array - 1 integer per tile to process
  * @param num_texture_tiles    allocated array - 8 integers (may be reduced to 4 later)
@@ -2126,7 +2125,6 @@ __global__ void clear_texture_rbga(
  *
  * @param num_cams             number of cameras
  * @param gpu_ftasks           flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
- //* @param gpu_tasks            array of per-tile tasks (struct tp_task)
  * @param num_tiles            number of tiles int gpu_tasks array prepared for processing
  * @param gpu_texture_indices  allocated array - 1 integer per tile to process
  * @param num_texture_tiles    number of texture tiles to process (allocated 8-element integer array)
@@ -2243,7 +2241,6 @@ __global__ void clear_texture_list(
  *
  * @param num_cams             number of cameras <= NUM_CAMS
  * @param gpu_ftasks           flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
-//* @param gpu_tasks            array of per-tile tasks (struct tp_task)
  * @param num_tiles            number of tiles int gpu_tasks array prepared for processing
  * @param width                number of tiles in a row
  * @param gpu_texture_indices  allocated array - 1 integer per tile to process
@@ -2459,7 +2456,6 @@ __global__ void index_direct(
  *
  * @param num_cams         number of cameras <= NUM_CAMS
  * @param gpu_ftasks           flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
- //* @param gpu_tasks            array of per-tile tasks (struct tp_task)
  * @param num_tiles            number of tiles int gpu_tasks array prepared for processing
  * @param width                number of tiles in a row
  * @param nonoverlap_list      integer array to place the generated list
@@ -3338,7 +3334,7 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 			// always copy 3 (1) colors + alpha
 			if (colors == 3){
 #pragma unroll
-				for (int ncol = 0; ncol < NUM_COLORS + 1; ncol++) { // 4
+				for (int ncol = 0; ncol < colors + 1; ncol++) { // 4
 					*(gpu_texture_rbg_gi + ncol * slice_stride) += *(rgba_i + ncol * (DTT_SIZE2 * DTT_SIZE21));
 				}
 			} else { // assuming colors = 1
@@ -3970,7 +3966,9 @@ __device__ void convertCorrectTile(
 		int                kernels_vert,
 		int                tilesx)
 {
+#ifdef DEBUG30
 	int dbg_tile = (num_colors & 16) != 0;
+#endif
 	num_colors &= 7;
 //	int tilesx = TILES-X;
 	int is_mono = num_colors == 1;

@@ -41,10 +41,10 @@
 #ifndef JCUDA
 #include <stdio.h>
 #define THREADSX              (DTT_SIZE)
-#define TEST_LWIR                      1
+#define TEST_LWIR                      0
 #define NUM_CAMS                      16 // now maximal number of cameras
 //#define NUM_PAIRS                      6
-#define NUM_COLORS                     1 //3
+//#define NUM_COLORS                     1 //3
 // kernels [num_cams][num_colors][KERNELS_HOR][KERNELS_VERT][4][64]
 #if TEST_LWIR
 	#define IMG_WIDTH                   640
@@ -72,7 +72,7 @@
 #define IMCLT_TILES_PER_BLOCK          4
 #define CORR_NTILE_SHIFT               8 // higher bits - number of a pair, other bits tile number
 // only lower bit will be used to request correlations, correlation mask will be common for all the scene
-#define CORR_PAIRS_MASK             0x3f// lower bits used to address correlation pair for the selected tile
+//#define CORR_PAIRS_MASK             0x3f// lower bits used to address correlation pair for the selected tile
 #define CORR_TEXTURE_BIT               7 // bit 7 used to request texture for the tile
 #define TASK_CORR_BITS                 4
 #define TASK_TEXTURE_N_BIT             0 // Texture with North neighbor
@@ -110,8 +110,8 @@
 	#define DBG_TILE_Y     36 // 88 // 121 // 69  // 111 // 66
 	#define DBG_TILE    (DBG_TILE_Y * 80 + DBG_TILE_X)
 #else
-	#define DBG_TILE_X     32 // 162 // 151 // 161 // 49
-	#define DBG_TILE_Y     88 // 121 // 69  // 111 // 66
+	#define DBG_TILE_X     114 // 32 // 162 // 151 // 161 // 49
+	#define DBG_TILE_Y     51  // 52  // 88 // 121 // 69  // 111 // 66
 	#define DBG_TILE    (DBG_TILE_Y * 324 + DBG_TILE_X)
 #endif
 #undef DBG_MARK_DBG_TILE

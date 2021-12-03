@@ -868,8 +868,8 @@ int main(int argc, char **argv)
 
     	calc_rot_deriv<<<grid_rot,threads_rot>>> (
     			num_cams,                // int                  num_cams,
-    			gpu_correction_vector ,           // 		struct corr_vector * gpu_correction_vector,
-    			gpu_rot_deriv);                  // union trot_deriv   * gpu_rot_deriv);
+    			gpu_correction_vector ,  // struct corr_vector * gpu_correction_vector,
+    			gpu_rot_deriv);          // union trot_deriv   * gpu_rot_deriv);
 
 
     	getLastCudaError("Kernel failure");
@@ -892,8 +892,8 @@ int main(int argc, char **argv)
 #define TEST_REVERSE_DISTORTIONS
 #ifdef  TEST_REVERSE_DISTORTIONS
     dim3 threads_rd(3,3,3);
-//    dim3 grid_rd   (NUM_CAMS, 1, 1);
-    dim3 grid_rd   (num_cams, 1, 1);
+    dim3 grid_rd   (NUM_CAMS, 1, 1); // can get rid of NUM_CAMS
+//    dim3 grid_rd   (num_cams, 1, 1);
 
     printf("REVERSE DISTORTIONS: threads_list=(%d, %d, %d)\n",threads_rd.x,threads_rd.y,threads_rd.z);
     printf("REVERSE DISTORTIONS: grid_list=(%d, %d, %d)\n",grid_rd.x,grid_rd.y,grid_rd.z);
@@ -1255,7 +1255,6 @@ int main(int argc, char **argv)
 				color_weights[2], // 0.5,   // float             scale2,             // scale for G
 				30.0,                       // float             fat_zero,           // here - absolute
 				gpu_ftasks,                 // float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
-//				gpu_tasks,                  // struct tp_task  * gpu_tasks,
 				tp_task_size,               // int               num_tiles) // number of tiles in task
 				TILESX,                     // int               tilesx,             // number of tile rows
 				gpu_corr_indices,           // int             * gpu_corr_indices,   // packed tile+pair
