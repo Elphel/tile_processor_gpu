@@ -41,7 +41,7 @@
 #ifndef JCUDA
 #include <stdio.h>
 #define THREADSX              (DTT_SIZE)
-#define TEST_LWIR                      0
+#define TEST_LWIR                      1
 #define NUM_CAMS                      16 // now maximal number of cameras
 //#define NUM_PAIRS                      6
 //#define NUM_COLORS                     1 //3

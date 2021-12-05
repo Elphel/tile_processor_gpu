@@ -30,7 +30,7 @@
  ** -----------------------------------------------------------------------------**
  */
 
-#define NOCORR
+//#define NOCORR
 #define NOCORR_TD
 #define NOTEXTURES
 #define NOTEXTURE_RGBA
@@ -1249,7 +1249,7 @@ int main(int argc, char **argv)
 				sel_pairs[2], // int               sel_pairs2,           // unused bits should be 0
 				sel_pairs[3], // int               sel_pairs3,           // unused bits should be 0
 				gpu_clt,                    // float          ** gpu_clt,            // [NUM_CAMS] ->[TILESY][TILESX][NUM_COLORS][DTT_SIZE*DTT_SIZE]
-				3,                          // int               colors,             // number of colors (3/1)
+				num_colors,                 // int               colors,             // number of colors (3/1)
 				color_weights[0], // 0.25,  // float             scale0,             // scale for R
 				color_weights[1], // 0.25,  // float             scale1,             // scale for B
 				color_weights[2], // 0.5,   // float             scale2,             // scale for G
