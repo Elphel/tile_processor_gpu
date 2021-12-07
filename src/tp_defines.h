@@ -106,8 +106,8 @@
 //#define DBG_TILE_X     40
 //#define DBG_TILE_Y     80
 #if TEST_LWIR
-	#define DBG_TILE_X     32 // 162 // 151 // 161 // 49
-	#define DBG_TILE_Y     36 // 88 // 121 // 69  // 111 // 66
+	#define DBG_TILE_X    52 // 32 // 162 // 151 // 161 // 49
+	#define DBG_TILE_Y     5 // 36 // 88 // 121 // 69  // 111 // 66
 	#define DBG_TILE    (DBG_TILE_Y * 80 + DBG_TILE_X)
 #else
 	#define DBG_TILE_X     114 // 32 // 162 // 151 // 161 // 49
@@ -126,6 +126,9 @@
 //#define DEBUG4 1
 //#define DEBUG5 1
 //#define DEBUG6 1
+
+// #define DEBUG7 1
+ #define DEBUG7A 1
 /*
 #define DEBUG7 1
 #define DEBUG8 1
