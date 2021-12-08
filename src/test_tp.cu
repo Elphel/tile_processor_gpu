@@ -861,7 +861,8 @@ int main(int argc, char **argv)
     gpu_generate_RBGA_params = (float *) copyalloc_kernel_gpu((float * ) generate_RBGA_params, sizeof(generate_RBGA_params));
 
 ///    int tile_texture_size = (texture_colors + 1 + (keep_texture_weights? (NUM_CAMS + texture_colors + 1): 0)) *256;
-    int tile_texture_size = (texture_colors + 1 + (keep_texture_weights? (num_cams + texture_colors + 1): 0)) *256;
+    int tile_texture_layers = (texture_colors + 1 + (keep_texture_weights? (num_cams + texture_colors + 1): 0));
+    int tile_texture_size = tile_texture_layers *256;
 
     gpu_textures = alloc_image_gpu(
     		&dstride_textures,              // in bytes ! for one rgba/ya 16x16 tile
@@ -1475,7 +1476,7 @@ int main(int argc, char **argv)
 
     		 dim3 threads0(CONVERT_DIRECT_INDEXING_THREADS, 1, 1);
     		 dim3 blocks0 ((tp_task_size + CONVERT_DIRECT_INDEXING_THREADS -1) >> CONVERT_DIRECT_INDEXING_THREADS_LOG2,1, 1);
-
+    		int  linescan_order = 1; // output low-res in linescan order, 0 - in gpu_texture_indices order
      		printf("threads0=(%d, %d, %d)\n",threads0.x,threads0.y,threads0.z);
      		printf("blocks0=(%d, %d, %d)\n",blocks0.x,blocks0.y,blocks0.z);
      		int   cpu_pnum_texture_tiles = 0;
@@ -1549,12 +1550,13 @@ int main(int argc, char **argv)
 							generate_RBGA_params[4], // min_agree,     // float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
 							gpu_color_weights,               // float             weights[3],         // scale for R,B,G
 							1,                       // dust_remove,                     // int               dust_remove,        // Do not reduce average weight when only one image differs much from the average
-							1, // 0,                               // int               keep_weights,       // return channel weights after A in RGBA (was removed) (should be 0 if gpu_texture_rbg)?
+							keep_texture_weights, // 0, // 1                               // int               keep_weights,       // return channel weights after A in RGBA (was removed) (should be 0 if gpu_texture_rbg)?
 							// combining both non-overlap and overlap (each calculated if pointer is not null )
 							0,                               // size_t      texture_rbg_stride, // in floats
 							(float *) 0,                     // float           * gpu_texture_rbg,     // (number of colors +1 + ?)*16*16 rgba texture tiles
-							0,                       // texture_stride,                  // size_t      texture_stride,     // in floats (now 256*4 = 1024)
-							(float *) 0,             // gpu_texture_tiles,               //(float *)0);// float           * gpu_texture_tiles);  // (number of colors +1 + ?)*16*16 rgba texture tiles
+							dstride_textures /sizeof(float),          // texture_stride,                  // size_t      texture_stride,     // in floats (now 256*4 = 1024)
+							gpu_textures, // (float *) 0,             // gpu_texture_tiles,               //(float *)0);// float           * gpu_texture_tiles);  // (number of colors +1 + ?)*16*16 rgba texture tiles
+							linescan_order,          // int               linescan_order,     // if !=0 then output gpu_diff_rgb_combo in linescan order, else  - in gpu_texture_indices order
 							gpu_diff_rgb_combo, //);             // float           * gpu_diff_rgb_combo) // diff[num_cams], R[num_cams], B[num_cams],G[num_cams]
 							TILESX);
     				getLastCudaError("Kernel failure");
@@ -1568,9 +1570,14 @@ int main(int argc, char **argv)
     		    printf("Average Texture run time =%f ms\n",  avgTimeTEXTURES);
 
     		    int rslt_texture_size =   num_textures * tile_texture_size;
-    		    float * cpu_textures = (float *)malloc(rslt_texture_size * sizeof(float));
+    			checkCudaErrors(cudaMemcpy(
+    					(float * ) texture_indices,
+						gpu_texture_indices,
+						cpu_pnum_texture_tiles  * sizeof(float),
+    					cudaMemcpyDeviceToHost));
 
-    		    checkCudaErrors(cudaMemcpy2D( // something wrong with size
+    		    float * cpu_textures = (float *)malloc(rslt_texture_size * sizeof(float));
+    		    checkCudaErrors(cudaMemcpy2D(
     		    		cpu_textures,
     					tile_texture_size * sizeof(float),
     					gpu_textures,
@@ -1578,6 +1585,33 @@ int main(int argc, char **argv)
     					tile_texture_size * sizeof(float),
     					num_textures,
     		    		cudaMemcpyDeviceToHost));
+//    		    float non_overlap_layers [tile_texture_layers][TILESY*16][TILESX*16];
+    		    int num_nonoverlap_pixels = tile_texture_layers * TILESY*16 * TILESX*16;
+    		    float * non_overlap_layers = (float *)malloc(num_nonoverlap_pixels* sizeof(float));
+    		    for (int i = 0; i < num_nonoverlap_pixels; i++){
+    		    	non_overlap_layers[i] = NAN;
+    		    }
+    		    for (int itile = 0; itile < cpu_pnum_texture_tiles; itile++) { // if (texture_indices[itile] & ((1 << LIST_TEXTURE_BIT))){
+    		    	int ntile = texture_indices[itile] >> CORR_NTILE_SHIFT;
+    		    	int tileX = ntile % TILESX;
+    		    	int tileY = ntile / TILESX;
+    		    	for (int ilayer = 0; ilayer < tile_texture_layers; ilayer++){
+    		    		int src_index0 = itile * tile_texture_size + 256 * ilayer;
+    		    		int dst_index0 =  ilayer * (TILESX * TILESYA * 256) + (tileY * 16) * (16 * TILESX) + (tileX * 16);
+    		    		for (int iy = 0; iy < 16; iy++){
+    		    			int src_index1 = src_index0 + 16 * iy;
+    		    			int dst_index1 = dst_index0 + iy * (16 * TILESX);
+        		    		for (int ix = 0; ix < 16; ix++){
+//        		    			int src_index = src_index1 + ix;
+//       		    			int dst_index = dst_index1 + ix;
+        		    			int src_index= itile * tile_texture_size + 256 * ilayer + 16 * iy + ix;
+        		    			int dst_index = ilayer * (TILESX * TILESYA * 256) + (tileY * 16 + iy) * (16 * TILESX) + (tileX * 16) + ix;
+        		    			non_overlap_layers[dst_index] = cpu_textures[src_index];
+        		    		}
+    		    		}
+    		    	}
+    		    }
+
 
     		    int ntiles = TILESX * TILESY;
     		    int nlayers = num_cams * (num_colors + 1);
@@ -1604,12 +1638,19 @@ int main(int argc, char **argv)
     		    				cpu_textures,    // float *       data, // allocated array
     							rslt_texture_size,    // int           size, // length in elements
     							result_textures_file); // 			   const char *  path) // file path
-    							*/
+    		    		 */
+    		    		writeFloatsToFile(
+    		    				non_overlap_layers,    // float *       data, // allocated array
+    							rslt_texture_size,     // int           size, // length in elements
+    							result_textures_file); // 			   const char *  path) // file path
+
+    		    		/*
+    		    		 * non_overlap_layers
     		    		writeFloatsToFile(
     		    				cpu_diff_rgb_combo, // cpu_diff_rgb_combo,    // float *       data, // allocated array
     							diff_rgb_combo_size,    // int           size, // length in elements
 								result_textures_file); // 			   const char *  path) // file path
-
+    		    		*/
     		    		printf("Writing low-res data to %s\n",  result_diff_rgb_combo_file);
     		    		writeFloatsToFile(
     		    				cpu_diff_rgb_combo_out, // cpu_diff_rgb_combo,    // float *       data, // allocated array
