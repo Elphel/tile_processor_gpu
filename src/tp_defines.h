@@ -134,6 +134,7 @@
 #define DEBUG8 1
 #define DEBUG9 1
 */
+#define DEBUG8A 1
 //textures
 //#define DEBUG10 1
 //#define DEBUG11 1

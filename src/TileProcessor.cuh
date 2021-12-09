@@ -2303,6 +2303,7 @@ __global__ void mark_texture_neighbor_tiles( // TODO: remove __global__?
 	if (task_num >= num_tiles) {
 		return; // nothing to do
 	}
+
 ///	int task = gpu_tasks[task_num].task;
 	int task = get_task_task(task_num, gpu_ftasks, num_cams);
 	if (!(task & TASK_TEXTURE_BITS)){ // here any bit in TASK_TEXTURE_BITS is sufficient
@@ -2322,6 +2323,7 @@ __global__ void mark_texture_neighbor_tiles( // TODO: remove __global__?
 	if ((x < (width - 1))  && *(gpu_texture_indices + (x + 1) + y *      width)) d |= (1 << TASK_TEXTURE_E_BIT);
 	if ((y < (height - 1)) && *(gpu_texture_indices +  x +     (y + 1) * width)) d |= (1 << TASK_TEXTURE_S_BIT);
 	if ((x > 0)            && *(gpu_texture_indices + (x - 1) + y *      width)) d |= (1 << TASK_TEXTURE_W_BIT);
+	// Set task texture bits in global gpu_ftasks array (lower 4 bits)
 ///	gpu_tasks[task_num].task = ((task ^ d) & TASK_TEXTURE_BITS) ^ task;
 	*(int *) (gpu_ftasks +  get_task_size(num_cams) * task_num) = ((task ^ d) & TASK_TEXTURE_BITS) ^ task;
 }
