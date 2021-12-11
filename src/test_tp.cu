@@ -32,7 +32,7 @@
 
 #define NOCORR
 #define NOCORR_TD
-//#define NOTEXTURES_HOST
+#define NOTEXTURES_HOST
 #define NOTEXTURES
 #define NOTEXTURE_RGBA
 #define SAVE_CLT
@@ -345,8 +345,8 @@ void generate_RBGA_host(
     // TODO: create gpu_woi to pass	(copy from woi)
     // set lower 4 bits in each gpu_ftasks task
     mark_texture_neighbor_tiles <<<blocks,threads>>>(
-    		num_cams,           // int                num_cams,
-			gpu_ftasks,         // float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
+    		num_cams,            // int                num_cams,
+			gpu_ftasks,          // float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
 			num_tiles,           // number of tiles in task list
 			width,               // number of tiles in a row
 			height,              // number of tiles rows
@@ -431,6 +431,22 @@ void generate_RBGA_host(
 	 dim3 threads2((1 << THREADS_DYNAMIC_BITS), 1, 1);
 	 int blocks_x2 = (texture_width + ((1 << (THREADS_DYNAMIC_BITS + DTT_SIZE_LOG2 )) - 1)) >> (THREADS_DYNAMIC_BITS + DTT_SIZE_LOG2);
 	 dim3 blocks2 (blocks_x2, texture_tiles_height * texture_slices, 1); // each thread - 8 vertical
+
+
+#ifdef DEBUG8A
+	 int                cpu_texture_indices      [TILESX*TILESYA];
+	 checkCudaErrors(cudaMemcpy(
+			 (float * ) cpu_texture_indices,
+			 gpu_texture_indices,
+			 TILESX*TILESYA * sizeof(float),
+			 cudaMemcpyDeviceToHost));
+	 for (int i = 0; i < 256; i++){
+		 int indx = cpu_texture_indices[i];
+		 printf("%02d %04x %03d %03d %x\n",i,indx, (indx>>8) / 80, (indx >> 8) % 80, indx&0xff);
+	 }
+#endif // #ifdef DEBUG8A
+
+
 	 clear_texture_rbga<<<blocks2,threads2>>>( // illegal value error
 			 texture_width,
 			 texture_tiles_height * texture_slices, // int               texture_slice_height,
@@ -461,22 +477,21 @@ void generate_RBGA_host(
 		 printf("\ngenerate_RBGA() threads_texture={%d, %d, %d)\n",
 				 threads_texture.x, threads_texture.y, threads_texture.z);
 		 printf("\n");
+
+
 #endif
 		 /* */
 		 int shared_size = host_get_textures_shared_size( // in bytes
 				 num_cams,     // int                num_cams,     // actual number of cameras
 				 colors,   // int                num_colors,   // actual number of colors: 3 for RGB, 1 for LWIR/mono
 				 0);           // int *              offsets);     // in floats
-
+		 cudaFuncSetAttribute(textures_accumulate, cudaFuncAttributeMaxDynamicSharedMemorySize, 65536); // for CC 7.5
+		 cudaFuncSetAttribute(textures_accumulate, cudaFuncAttributePreferredSharedMemoryCarveout,cudaSharedmemCarveoutMaxShared);
 		 textures_accumulate <<<grid_texture,threads_texture, shared_size>>>(
 				 num_cams,                        // int               num_cams,           // number of cameras used
 				 gpu_woi,                             // int             * woi,                // x, y, width,height
 				 gpu_clt,                         // float          ** gpu_clt,            // [num_cams] ->[TILES-Y][TILES-X][colors][DTT_SIZE*DTT_SIZE]
 				 ntt,                             // size_t            num_texture_tiles,  // number of texture tiles to process
-// TODO: add int parameter ti_offset  (can not pass to the middle of a device array)?
-// alternatively (to minimize dynamic parallelism mods) temporarily copy the 1/4 of a gpu_texture_indices
-// or still pass parameter?
-// first - try to add offset to GPU address
 				 gpu_texture_indices + ti_offset, // int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
 				 gpu_geometry_correction,         // struct gc       * gpu_geometry_correction,
 				 colors,                          // int               colors,             // number of colors (3/1)

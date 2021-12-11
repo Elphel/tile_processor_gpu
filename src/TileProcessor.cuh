@@ -978,33 +978,30 @@ __device__ void imclt_plane( // not implemented, not used
 		float           * gpu_rbg,            // WIDTH, HEIGHT
 		const size_t      dstride);            // in floats (pixels)
 
-__global__ void clear_texture_list(
+extern "C" __global__ void clear_texture_list(
 		int              * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
 		int                width,  // <= TILES-X, use for faster processing of LWIR images
 		int                height); // <= TILES-Y, use for faster processing of LWIR images
 
-__global__ void mark_texture_tiles(
+extern "C" __global__ void mark_texture_tiles(
 		int                num_cams,
 		float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
-///		struct tp_task   * gpu_tasks,
 		int                num_tiles,           // number of tiles in task list
 		int                width,               // number of tiles in a row
 		int              * gpu_texture_indices);// packed tile + bits (now only (1 << 7)
 
-__global__ void mark_texture_neighbor_tiles( // TODO: remove __global__?
+extern "C" __global__ void mark_texture_neighbor_tiles( // TODO: remove __global__?
 		int                num_cams,
 		float            * gpu_ftasks,          // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
-///		struct tp_task   * gpu_tasks,
 		int                num_tiles,           // number of tiles in task list
 		int                width,               // number of tiles in a row
 		int                height,              // number of tiles rows
 		int              * gpu_texture_indices, // packed tile + bits (now only (1 << 7)
 		int              * woi);                  // x,y,width,height of the woi
 
-__global__ void gen_texture_list(
+extern "C" __global__ void gen_texture_list(
 		int                num_cams,
 		float            * gpu_ftasks,          // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
-///		struct tp_task   * gpu_tasks,
 		int                num_tiles,            // number of tiles in task list
 		int                width,                // number of tiles in a row
 		int                height,               // number of tiles rows
@@ -1012,7 +1009,7 @@ __global__ void gen_texture_list(
 		int              * num_texture_tiles,    // number of texture tiles to process
 		int              * woi);                 // min_x, min_y, max_x, max_y input
 
-__global__ void clear_texture_rbga(
+extern "C" __global__ void clear_texture_rbga(
 		int               texture_width,
 		int               texture_slice_height,
 		const size_t      texture_rbga_stride,     // in floats 8*stride
@@ -1044,10 +1041,9 @@ __global__ void index_correlate(
 		int *              gpu_corr_indices,  // array of correlation tasks
 		int *              pnum_corr_tiles);   // pointer to the length of correlation tasks array
 
-__global__ void create_nonoverlap_list(
+extern "C" __global__ void create_nonoverlap_list(
 		int                num_cams,
 		float            * gpu_ftasks ,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
-//		struct tp_task   * gpu_tasks,
 		int                num_tiles,           // number of tiles in task
 		int                width,               // number of tiles in a row
 		int *              nonoverlap_list,     // pointer to the calculated number of non-zero tiles
@@ -2279,8 +2275,7 @@ __global__ void mark_texture_tiles(
  * the result textures to fade along the border.
  *
  * @param num_cams             number of cameras
- * @param gpu_ftasks           flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
-// * @param gpu_tasks            array of per-tile tasks (struct tp_task)
+ * @param gpu_ftasks           flattened tasks, 29 floats for quad EO, 101 floats for LWIR16
  * @param num_tiles            number of tiles int gpu_tasks array prepared for processing
  * @param width                number of tiles in a row
  * @param height               number of tiles rows
@@ -2291,7 +2286,6 @@ __global__ void mark_texture_tiles(
 __global__ void mark_texture_neighbor_tiles( // TODO: remove __global__?
 		int                num_cams,
 		float            * gpu_ftasks,          // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
-///		struct tp_task   * gpu_tasks,
 		int                num_tiles,           // number of tiles in task list
 		int                width,               // number of tiles in a row
 		int                height,              // number of tiles rows
@@ -2304,12 +2298,10 @@ __global__ void mark_texture_neighbor_tiles( // TODO: remove __global__?
 		return; // nothing to do
 	}
 
-///	int task = gpu_tasks[task_num].task;
 	int task = get_task_task(task_num, gpu_ftasks, num_cams);
 	if (!(task & TASK_TEXTURE_BITS)){ // here any bit in TASK_TEXTURE_BITS is sufficient
 		return; // NOP tile
 	}
-///	int cxy = gpu_tasks[task_num].txy;
 	int cxy = get_task_txy(task_num, gpu_ftasks, num_cams);
 
 	int x = (cxy & 0xffff);
@@ -2344,12 +2336,11 @@ __global__ void mark_texture_neighbor_tiles( // TODO: remove __global__?
  */
 __global__ void gen_texture_list(
 		int                num_cams,
-		float            * gpu_ftasks,          // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
-///		struct tp_task   * gpu_tasks,
+		float            * gpu_ftasks,           // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
 		int                num_tiles,            // number of tiles in task list
 		int                width,                // number of tiles in a row
 		int                height,               // number of tiles rows
-		int              * gpu_texture_indices, // packed tile + bits (now only (1 << 7)
+		int              * gpu_texture_indices,  // packed tile + bits (now only (1 << 7)
 		int              * num_texture_tiles,    // number of texture tiles to process
 		int              * woi)                  // min_x, min_y, max_x, max_y input
 
@@ -2413,7 +2404,10 @@ __global__ void gen_texture_list(
 	}
 	__syncthreads();// __syncwarp();
 #endif // DEBUG12
-	*(gpu_texture_indices + buf_offset) = task | ((x + y * width) << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT);
+//	*(gpu_texture_indices + buf_offset) = task | ((x + y * width) << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT);
+	// keep only 8 LSBs of task, use higher 24 for task number
+	*(gpu_texture_indices + buf_offset) = (task & ((1 << CORR_NTILE_SHIFT) -1)) | ((x + y * width) << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT);
+	//CORR_NTILE_SHIFT
 }
 //inline __device__ int get_task_size(int num_cams){
 //	return sizeof(struct tp_task)/sizeof(float) - 6 * (NUM_CAMS - num_cams);
@@ -2465,7 +2459,7 @@ __global__ void index_direct(
  * @param nonoverlap_list      integer array to place the generated list
  * @param pnonoverlap_length   single-element integer array return generated list length
  */
-__global__ void create_nonoverlap_list(
+extern "C" __global__ void create_nonoverlap_list(
 		int                num_cams,
 		float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
 //		struct tp_task   * gpu_tasks,
@@ -3334,7 +3328,7 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 		}
 		__syncthreads();// __syncwarp();
 #endif // DEBUG12
-		int alpha_mode = alphaIndex[tile_code];
+		int alpha_mode = alphaIndex[tile_code]; // only 4 lowest bits
 		if (!alpha_mode){ // only multiply if needed, alpha_mode == 0 - keep as is.
 			for (int pass = 0; pass < 8; pass ++) {
 				int row = pass * 2 + (threadIdx.y >> 1);
