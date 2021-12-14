@@ -1109,6 +1109,7 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 		int             * woi,                // x, y, width,height
 		float          ** gpu_clt,            // [num_cams] ->[TILES-Y][TILES-X][colors][DTT_SIZE*DTT_SIZE]
 		size_t            num_texture_tiles,  // number of texture tiles to process
+		int               gpu_texture_indices_offset,// add to gpu_texture_indices
 		int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
 		// TODO: use geometry_correction rXY !
 		struct gc       * gpu_geometry_correction,
@@ -1151,7 +1152,7 @@ __device__ int get_textures_shared_size( // in bytes
  * @param scale1           scale blue (if colors = 3) component before mixing
  * @param scale2           scale green (if colors = 3) component before mixing
  * @param fat_zero         add this value squared to the sum of squared components before normalization\
- * @param gpu_ftasks           flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
+ * @param gpu_ftasks           flattened tasks, 29 floats for quad EO, 101 floats for LWIR16
 // * @param gpu_tasks        array of per-tile tasks (now bits 4..9 - correlation pairs)
  * @param num_tiles        number of tiles int gpu_tasks array prepared for processing
  * @param tilesx           number of tile rows
@@ -1190,14 +1191,12 @@ extern "C" __global__ void correlate2D(
 		 *pnum_corr_tiles = 0;
 		 index_correlate<<<blocks0,threads0>>>(
 				 num_cams,            // int               num_cams,
-//				 sel_pairs,           // int *             sel_pairs,
 				 sel_pairs0,          // int               sel_pairs0,
 				 sel_pairs1,          // int               sel_pairs1,
 				 sel_pairs2,          // int               sel_pairs2,
 				 sel_pairs3,          // int               sel_pairs3,
 
-				 gpu_ftasks,          // float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
-				 //				 gpu_tasks,           // struct tp_task   * gpu_tasks,
+				 gpu_ftasks,          // float            * gpu_ftasks,         // flattened tasks, 29 floats for quad EO, 101 floats for LWIR16
 				 num_tiles,           // int                num_tiles,          // number of tiles in task
 				 tilesx,              // int                width,                // number of tiles in a row
 				 gpu_corr_indices,    // int *              gpu_corr_indices,  // array of correlation tasks
@@ -2062,7 +2061,8 @@ extern "C" __global__ void generate_RBGA(
 			    		woi,                             // int             * woi,                // x, y, width,height
 						gpu_clt,                         // float          ** gpu_clt,            // [num_cams] ->[TILES-Y][TILES-X][colors][DTT_SIZE*DTT_SIZE]
 						ntt,                             // size_t            num_texture_tiles,  // number of texture tiles to process
-						gpu_texture_indices + ti_offset, // int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
+						ti_offset,                       //                   gpu_texture_indices_offset,// add to gpu_texture_indices
+						gpu_texture_indices, //  + ti_offset, // int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
 						gpu_geometry_correction,         // struct gc       * gpu_geometry_correction,
 						colors,                          // int               colors,             // number of colors (3/1)
 						is_lwir,                         // int               is_lwir,            // do not perform shot correction
@@ -2789,7 +2789,9 @@ __global__ void convert_correct_tiles(
  * @param dust_remove          do not reduce average weight when only one image differs much from the average (true)
  * @param texture_stride       output stride in floats (now 256*4 = 1024)
  * @param gpu_texture_tiles    output array (number of colors +1 + ?)*16*16 rgba texture tiles) float values. Will not be calculated if null
+ * @param inescan_order        0 low-res tiles have tghe same order, as gpu_texture_indices, 1 - in linescan order
  * @param gpu_diff_rgb_combo   low-resolution output, with per-camera mismatch an each color average. Will not be calculated if null
+ * @param num_tilesx           number of tiles in a row
  */
 extern "C" __global__ void textures_nonoverlap(
 		int               num_cams,           // number of cameras
@@ -2810,6 +2812,7 @@ extern "C" __global__ void textures_nonoverlap(
 // combining both non-overlap and overlap (each calculated if pointer is not null )
 		size_t            texture_stride,     // in floats (now 256*4 = 1024)
 		float           * gpu_texture_tiles,  // (number of colors +1 + ?)*16*16 rgba texture tiles
+		int               linescan_order,     // 0 low-res tiles have tghe same order, as gpu_texture_indices, 1 - in linescan order
 		float           * gpu_diff_rgb_combo, // diff[num_cams], R[num_cams], B[num_cams],G[num_cams]
 		int               num_tilesx)
 // num_tilesx in the end - worked, after num_tiles - did not compile with JIT in Eclipse
@@ -2856,6 +2859,7 @@ extern "C" __global__ void textures_nonoverlap(
 				(int *) 0,                       // int             * woi,                // x, y, width,height
 				gpu_clt,                         // float          ** gpu_clt,            // [num_cams] ->[TILES-Y][TILES-X][colors][DTT_SIZE*DTT_SIZE]
 				*pnum_texture_tiles,             // size_t            num_texture_tiles,  // number of texture tiles to process
+				0,                               //                gpu_texture_indices_offset,// add to gpu_texture_indices
 				gpu_texture_indices,             // int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
 				gpu_geometry_correction,         // struct gc       * gpu_geometry_correction,
 				colors,                          // int               colors,             // number of colors (3/1)
@@ -2872,8 +2876,8 @@ extern "C" __global__ void textures_nonoverlap(
 				0,                               // size_t      texture_rbg_stride, // in floats
 				(float *) 0,                     // float           * gpu_texture_rbg,     // (number of colors +1 + ?)*16*16 rgba texture tiles
 				texture_stride,                  // size_t      texture_stride,     // in floats (now 256*4 = 1024)
-				gpu_texture_tiles,               //(float *)0);// float           * gpu_texture_tiles);  // (number of colors +1 + ?)*16*16 rgba texture tiles
-				1, // 	int               linescan_order,     // if !=0 then output gpu_diff_rgb_combo in linescan order, else  - in gpu_texture_indices order
+				gpu_texture_tiles,               // (float *)0);// float           * gpu_texture_tiles);  // (number of colors +1 + ?)*16*16 rgba texture tiles
+				linescan_order,                  //	int               linescan_order,     // if !=0 then output gpu_diff_rgb_combo in linescan order, else  - in gpu_texture_indices order
 				gpu_diff_rgb_combo, //);             // float           * gpu_diff_rgb_combo) // diff[num_cams], R[num_cams], B[num_cams],G[num_cams]
 				num_tilesx);
 	 }
@@ -2892,6 +2896,7 @@ extern "C" __global__ void textures_nonoverlap(
  * @param woi                  WoI for the output texture (x,y,width,height of the woi), may be null if overlapped output is not used
  * @param gpu_clt              array of num_cams pointers to the CLT (frequency domain) data [TILES-Y][TILES-X][NUM_COLORS][DTT_SIZE*DTT_SIZE]
  * @param num_texture_tiles    number of texture tiles to process
+ * @param gpu_texture_indices_offset add to gpu_texture_indices
  * @param gpu_texture_indices  array - 1 integer per tile to process
  * @param gpu_geometry_correction geometry correction structure, used for rXY to determine pairs weight
  * @param colors               number of colors used:  3 for RGB or 1 for monochrome
@@ -2918,6 +2923,7 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 		int             * woi,                // x, y, width,height
 		float          ** gpu_clt,            // [num_cams] ->[TILES-Y][TILES-X][colors][DTT_SIZE*DTT_SIZE]
 		size_t            num_texture_tiles,  // number of texture tiles to process
+		int               gpu_texture_indices_offset,// add to gpu_texture_indices
 		int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
 		struct gc       * gpu_geometry_correction,
 		int               colors,             // number of colors (3/1)
@@ -2959,7 +2965,7 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 		return; // nothing to do
 	}
 	// get number of tile
-	int tile_code = gpu_texture_indices[tile_indx];
+	int tile_code = gpu_texture_indices[tile_indx + gpu_texture_indices_offset]; // Added for Java, no DP
 	if ((tile_code & (1 << CORR_TEXTURE_BIT)) == 0){
 		return; // nothing to do
 	}
@@ -3513,11 +3519,25 @@ __global__ void imclt_rbg_all(
 		int                woi_theight,
 		const size_t       dstride)            // in floats (pixels)
 {
+
 //	int num_cams = sizeof(gpu_clt)/sizeof(&gpu_clt[0]);
+	dim3 threads_erase8x8(DTT_SIZE, NUM_THREADS/DTT_SIZE, 1);
+	dim3 grid_erase8x8_right_col (1, woi_theight + 1, 1);
+	dim3 grid_erase8x8_bottom_row(woi_twidth + 1, 1, 1);
 	dim3 threads_imclt(IMCLT_THREADS_PER_TILE, IMCLT_TILES_PER_BLOCK, 1);
 	if (threadIdx.x == 0) { // anyway 1,1,1
 		for (int ncam = 0; ncam < num_cams; ncam++) { // was NUM_CAMS
 			for (int color = 0; color < colors; color++) {
+				// clear right and bottom 8-pixel column and row
+				float *right_col = gpu_corr_images[ncam] + dstride * (woi_theight * DTT_SIZE + DTT_SIZE) * color + (woi_twidth * DTT_SIZE);
+				erase8x8<<<grid_erase8x8_right_col,threads_erase8x8>>>(
+						right_col,             // float           * gpu_top_left,
+						dstride);              // const size_t      dstride);
+				float *bottom_row = gpu_corr_images[ncam] + dstride * (woi_theight * DTT_SIZE + DTT_SIZE) * color +  dstride * (woi_theight * DTT_SIZE);
+				erase8x8<<<grid_erase8x8_bottom_row,threads_erase8x8>>>(
+						bottom_row,             // float           * gpu_top_left,
+						dstride);              // const size_t      dstride);
+
 				for (int v_offs = 0; v_offs < 2; v_offs++){
 					for (int h_offs = 0; h_offs < 2; h_offs++){
 						int tilesy_half = (woi_theight + (v_offs ^ 1)) >> 1;
@@ -3544,7 +3564,25 @@ __global__ void imclt_rbg_all(
 	}
 }
 
-
+/**
+ * Clear 8x8 tiles, used to erase right and bottom 8-pixel wide column/row before imclt_rbg
+ * @param gpu_top_left - pointer to the top-left corner of the firsr tile to erase
+ * @param dstride - offset for 1 pixel step down
+ * block.x - horizontal tile  offset
+ * block.y - vertical tile offset
+ * 0<=thread.x < 8 - horizontal pixel offset
+ * 0<=thread.y < 4 - vertical pixel offset
+ */
+extern "C"
+__global__ void erase8x8(
+		float           * gpu_top_left,
+		const size_t      dstride)
+{
+	float * pixel = gpu_top_left + (((blockIdx.y * DTT_SIZE) + threadIdx.y) * dstride) + ((blockIdx.x * DTT_SIZE) + threadIdx.x);
+	* pixel = 0.0f;
+	pixel += dstride * blockDim.y; // add 4 pixel rows (assuming blockDim.x==4)
+	* pixel = 0.0f;
+}
 
 /**
  * Helper kernel for imclt_rbg_all(), generate per-camera -per color image from the in-memory frequency domain representation.
@@ -3573,7 +3611,7 @@ __global__ void imclt_rbg(
 		const size_t      dstride)            // in floats (pixels)
 {
 	float *color_plane = gpu_rbg + dstride * (woi_theight * DTT_SIZE + DTT_SIZE) * color;
-	int pass =           (v_offset << 1) + h_offset;     		// 0..3 to correctly acummulate 16x16 tiles stride 8
+	int pass =           (v_offset << 1) + h_offset;     		// 0..3 to correctly accumulate 16x16 tiles stride 8
 	int tile_in_block = threadIdx.y;
 	int tile_num = blockIdx.x * IMCLT_TILES_PER_BLOCK + tile_in_block;
 	int tilesx_half = (woi_twidth + (h_offset ^ 1)) >> 1;

@@ -134,7 +134,7 @@
 #define DEBUG8 1
 #define DEBUG9 1
 */
-#define DEBUG8A 1
+//#define DEBUG8A 1 // generate_RBGA_host
 //textures
 //#define DEBUG10 1
 //#define DEBUG11 1

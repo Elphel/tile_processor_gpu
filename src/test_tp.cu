@@ -31,8 +31,8 @@
  */
 
 #define NOCORR
-#define NOCORR_TD
-#define NOTEXTURES_HOST
+//#define NOCORR_TD
+//#define NOTEXTURES_HOST
 #define NOTEXTURES
 #define NOTEXTURE_RGBA
 #define SAVE_CLT
@@ -492,7 +492,9 @@ void generate_RBGA_host(
 				 gpu_woi,                             // int             * woi,                // x, y, width,height
 				 gpu_clt,                         // float          ** gpu_clt,            // [num_cams] ->[TILES-Y][TILES-X][colors][DTT_SIZE*DTT_SIZE]
 				 ntt,                             // size_t            num_texture_tiles,  // number of texture tiles to process
-				 gpu_texture_indices + ti_offset, // int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
+				 ti_offset,                       //                gpu_texture_indices_offset,// add to gpu_texture_indices
+				 gpu_texture_indices, //  + ti_offset, // int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
+//				 gpu_texture_indices + ti_offset, // int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
 				 gpu_geometry_correction,         // struct gc       * gpu_geometry_correction,
 				 colors,                          // int               colors,             // number of colors (3/1)
 				 is_lwir,                         // int               is_lwir,            // do not perform shot correction
@@ -1626,7 +1628,6 @@ int main(int argc, char **argv)
     	// FIXME: provide sel_pairs
         correlate2D<<<1,1>>>( // output TD tiles, no normalization
         		num_cams,                      // int               num_cams,
-				//				0,                             // int *             sel_pairs,           // unused bits should be 0
 				sel_pairs[0], // int               sel_pairs0           // unused bits should be 0
 				sel_pairs[1], // int               sel_pairs1,           // unused bits should be 0
 				sel_pairs[2], // int               sel_pairs2,           // unused bits should be 0
@@ -1638,7 +1639,6 @@ int main(int argc, char **argv)
 				color_weights[2], // 0.5,      // float             scale2,             // scale for G
 				30.0,                          // float             fat_zero,           // here - absolute
 				gpu_ftasks,                    // float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
-//				gpu_tasks,                     // struct tp_task  * gpu_tasks,
 				tp_task_size,                  // int               num_tiles) // number of tiles in task
 				TILESX,                        // int               tilesx,             // number of tile rows
 				gpu_corr_indices,              // int             * gpu_corr_indices,   // packed tile+pair
@@ -1795,6 +1795,7 @@ int main(int argc, char **argv)
 							(int *) 0,                       // int             * woi,                // x, y, width,height
 							gpu_clt,                         // float          ** gpu_clt,            // [num_cams] ->[TILES-Y][TILES-X][colors][DTT_SIZE*DTT_SIZE]
 							cpu_pnum_texture_tiles, // *pnum_texture_tiles,             // size_t            num_texture_tiles,  // number of texture tiles to process
+							0,                               //                gpu_texture_indices_offset,// add to gpu_texture_indices
 							gpu_texture_indices,             // int             * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
 							gpu_geometry_correction,         // struct gc       * gpu_geometry_correction,
 							texture_colors,                  // int               colors,             // number of colors (3/1)
@@ -1949,7 +1950,7 @@ int main(int argc, char **argv)
 //    printf("grid_texture=(%d, %d, %d)\n",grid_texture.x,grid_texture.y,grid_texture.z);
     StopWatchInterface *timerTEXTURE = 0;
     sdkCreateTimer(&timerTEXTURE);
-
+	int  linescan_order = 1; // output low-res in linescan order, 0 - in gpu_texture_indices order
     for (int i = i0; i < numIterations; i++)
     {
     	if (i == 0)
@@ -1986,7 +1987,8 @@ int main(int argc, char **argv)
 				1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
     	// combining both non-overlap and overlap (each calculated if pointer is not null )
 				0, // dstride_textures/sizeof(float), // size_t            texture_stride,     // in floats (now 256*4 = 1024)  // may be 0 if not needed
-				(float *) 0,          // gpu_textures,         // float           * gpu_texture_tiles,  // (number of colors +1 + ?)*16*16 rgba texture tiles    // may be 0 if not needed
+				(float *) 0,          // gpu_textures,         // float           * gpu_texture_tiles,  // (number of colors +1 + ?)*16*16 rgba texture tiles    // may be 0 if not needed\
+				linescan_order,       // int               linescan_order,     // 0 low-res tiles have tghe same order, as gpu_texture_indices, 1 - in linescan order
 				gpu_diff_rgb_combo, //);  // float           * gpu_diff_rgb_combo); // diff[NUM_CAMS], R[NUM_CAMS], B[NUM_CAMS],G[NUM_CAMS] // may be 0 if not needed
 				TILESX);
     	getLastCudaError("Kernel failure");
