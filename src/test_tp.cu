@@ -661,6 +661,7 @@ int main(int argc, char **argv)
 //#endif
     const char* result_corr_file =          "/home/eyesis/git/tile_processor_gpu/clt/aux_corr.corr";
     const char* result_corr_quad_file =     "/home/eyesis/git/tile_processor_gpu/clt/aux_corr-quad.corr";
+    const char* result_corr_td_norm_file =  "/home/eyesis/git/tile_processor_gpu/clt/aux_corr-td-norm.corr";
 ///    const char* result_corr_cross_file = "/home/eyesis/git/tile_processor_gpu/clt/aux_corr-cross.corr";
     const char* result_textures_file =      "/home/eyesis/git/tile_processor_gpu/clt/aux_texture_aux.rgba";
     const char* result_diff_rgb_combo_file ="/home/eyesis/git/tile_processor_gpu/clt/aux_diff_rgb_combo.drbg";
@@ -722,6 +723,7 @@ int main(int argc, char **argv)
 //#endif
     const char* result_corr_file = "/home/eyesis/git/tile_processor_gpu/clt/main_corr.corr";
     const char* result_corr_quad_file =  "/home/eyesis/git/tile_processor_gpu/clt/main_corr-quad.corr";
+    const char* result_corr_td_norm_file =  "/home/eyesis/git/tile_processor_gpu/clt/aux_corr-td-norm.corr";
 ///    const char* result_corr_cross_file = "/home/eyesis/git/tile_processor_gpu/clt/main_corr-cross.corr";
     const char* result_textures_file =       "/home/eyesis/git/tile_processor_gpu/clt/main_texture.rgba";
     const char* result_diff_rgb_combo_file ="/home/eyesis/git/tile_processor_gpu/clt/main_diff_rgb_combo.drbg";
@@ -978,25 +980,6 @@ int main(int argc, char **argv)
 			    (float *) &tile_coords_h[ncam],
 				ports_offs_xy_file[ncam]); // 			   char *  path) // file path
     }
-    /*
-    // build TP task that processes all tiles in linescan order
-    for (int ty = 0; ty < TILESY; ty++){
-        for (int tx = 0; tx < TILESX; tx++){
-            int nt = ty * TILESX + tx;
-            task_data[nt].task = 0xf | (((1 << NUM_PAIRS)-1) << TASK_CORR_BITS);
-            task_data[nt].txy = tx + (ty << 16);
-        //  for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
-            for (int ncam = 0; ncam < num_cams; ncam++) {
-                task_data[nt].xy[ncam][0] = tile_coords_h[ncam][nt][0];
-                task_data[nt].xy[ncam][1] = tile_coords_h[ncam][nt][1];
-                task_data[nt].target_disparity = DBG_DISPARITY;
-            }
-        }
-    }
-
-    int tp_task_size =  sizeof(task_data)/sizeof(struct tp_task);
-    int num_active_tiles; // will be calculated by convert_direct
-    */
 
     for (int ty = 0; ty < TILESY; ty++){
         for (int tx = 0; tx < TILESX; tx++){
@@ -1019,80 +1002,19 @@ int main(int argc, char **argv)
 
     int tp_task_size =  TILESX * TILESY; // sizeof(ftask_data)/sizeof(float)/task_size; // number of task tiles
     int num_active_tiles; // will be calculated by convert_direct
+	int rslt_corr_size;
+	int corr_img_size;
 
-
-
-
-
-#ifdef DBG0
-//#define NUM_TEST_TILES 128
-#define NUM_TEST_TILES 1
-    for (int t = 0; t < NUM_TEST_TILES; t++) {
-    	task_data[t].task = 1;
-    	task_data[t].txy = ((DBG_TILE + t) - 324* ((DBG_TILE + t) / 324)) + (((DBG_TILE + t) / 324)) << 16;
-    	int nt = task_data[t].ty * TILESX + task_data[t].tx;
-
-//      for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
-        for (int ncam = 0; ncam < num_cams; ncam++) {
-    		task_data[t].xy[ncam][0] = tile_coords_h[ncam][nt][0];
-    		task_data[t].xy[ncam][1] = tile_coords_h[ncam][nt][1];
-    	}
-    }
-    tp_task_size =  NUM_TEST_TILES; // sizeof(task_data)/sizeof(float);
-
-#endif
-
-    // segfault in the next
-///    gpu_tasks =  (struct tp_task  *) copyalloc_kernel_gpu((float * ) &task_data, tp_task_size * (sizeof(struct tp_task)/sizeof(float)));
-//    gpu_ftasks = (float  *) copyalloc_kernel_gpu((float * ) &ftask_data, tp_task_size * task_size); // (sizeof(struct tp_task)/sizeof(float)));
     gpu_ftasks = (float  *) copyalloc_kernel_gpu(ftask_data, tp_task_size * task_size); // (sizeof(struct tp_task)/sizeof(float)));
 
-    // build corr_indices - not needed anymore?
-    /*
-    num_corrs = 0;
-    for (int ty = 0; ty < TILESY; ty++){
-    	for (int tx = 0; tx < TILESX; tx++){
-    		int nt = ty * TILESX + tx;
-    		int cm = (task_data[nt].task >> TASK_CORR_BITS) & ((1 << NUM_PAIRS)-1);
-    		if (cm){
-    			for (int b = 0; b < NUM_PAIRS; b++) if ((cm & (1 << b)) != 0) {
-    				corr_indices[num_corrs++] = (nt << CORR_NTILE_SHIFT) | b;
-    			}
-    		}
-    	}
-    }
-    // num_corrs now has the total number of correlations
-    // copy corr_indices to gpu
-    gpu_corr_indices = (int  *) copyalloc_kernel_gpu(
-    		(float * ) corr_indices,
-			num_corrs,
-			NUM_PAIRS * TILESX * TILESY);
-    */
     // just allocate
     checkCudaErrors (cudaMalloc((void **)&gpu_corr_indices,        num_pairs * TILESX * TILESY*sizeof(int)));
     checkCudaErrors (cudaMalloc((void **)&gpu_corrs_combo_indices,             TILESX * TILESY*sizeof(int)));
-//
-
-    // build texture_indices
-    /*
-    num_textures = 0;
-    for (int ty = 0; ty < TILESY; ty++){
-    	for (int tx = 0; tx < TILESX; tx++){
-    		int nt = ty * TILESX + tx;
-    		int cm = task_data[nt].task & TASK_TEXTURE_BITS;
-    		if (cm){
-    			texture_indices[num_textures++] = (nt << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT);
-    		}
-    	}
-    }
-    */
     num_textures = 0;
     for (int ty = 0; ty < TILESY; ty++){
     	for (int tx = 0; tx < TILESX; tx++){
     		int nt = ty * TILESX + tx;
             float *tp = ftask_data + task_size * nt;
-
-//    		int cm = task_data[nt].task & TASK_TEXTURE_BITS;
     		int cm = (*(int *) tp) & TASK_TEXTURE_BITS;
     		if (cm){
     			texture_indices[num_textures++] = (nt << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT);
@@ -1152,6 +1074,15 @@ int main(int argc, char **argv)
     const int numIterations = 10; // 0; //0;
     const int i0 = -1; // 0; // -1;
 #endif
+
+	int corr_size =        2 * CORR_OUT_RAD + 1;
+	int num_tiles = TILESX * TILESYA;
+	int num_corr_indices = num_pairs * num_tiles;
+
+	float * corr_img; //  = (float *)malloc(corr_img_size * sizeof(float));
+	float * cpu_corr; //  = (float *)malloc(rslt_corr_size * sizeof(float));
+	int * cpu_corr_indices; //  = (int *) malloc(num_corr_indices * sizeof(int));
+
 
 
 
@@ -1561,7 +1492,7 @@ int main(int argc, char **argv)
 				color_weights[0], // 0.25,  // float             scale0,             // scale for R
 				color_weights[1], // 0.25,  // float             scale1,             // scale for B
 				color_weights[2], // 0.5,   // float             scale2,             // scale for G
-				30.0,                       // float             fat_zero,           // here - absolute
+				30.0 * 30.0,                // float             fat_zero2,           // here - absolute
 				gpu_ftasks,                 // float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
 				tp_task_size,               // int               num_tiles) // number of tiles in task
 				TILESX,                     // int               tilesx,             // number of tile rows
@@ -1579,18 +1510,25 @@ int main(int argc, char **argv)
     sdkStopTimer(&timerCORR);
     float avgTimeCORR = (float)sdkGetTimerValue(&timerCORR) / (float)numIterations;
     sdkDeleteTimer(&timerCORR);
-//    printf("Average CORR run time =%f ms, num cor tiles (old) = %d\n",  avgTimeCORR, num_corrs);
+    //    printf("Average CORR run time =%f ms, num cor tiles (old) = %d\n",  avgTimeCORR, num_corrs);
 
-	checkCudaErrors(cudaMemcpy(
-			&num_corrs,
+    checkCudaErrors(cudaMemcpy(
+    		&num_corrs,
 			gpu_num_corr_tiles,
 			sizeof(int),
 			cudaMemcpyDeviceToHost));
     printf("Average CORR run time =%f ms, num cor tiles (new) = %d\n",  avgTimeCORR, num_corrs);
 
-    int corr_size =        2 * CORR_OUT_RAD + 1;
-    int rslt_corr_size =   num_corrs * corr_size * corr_size;
-    float * cpu_corr = (float *)malloc(rslt_corr_size * sizeof(float));
+//    int corr_size =        2 * CORR_OUT_RAD + 1;
+//    int rslt_corr_size =   num_corrs * corr_size * corr_size;
+//    float * cpu_corr = (float *)malloc(rslt_corr_size * sizeof(float));
+
+	rslt_corr_size =   num_corrs * corr_size * corr_size;
+	corr_img_size = num_corr_indices * 16*16; // NAN
+	corr_img = (float *)malloc(corr_img_size * sizeof(float));
+	cpu_corr = (float *)malloc(rslt_corr_size * sizeof(float));
+	cpu_corr_indices = (int *) malloc(num_corr_indices * sizeof(int));
+
 
     checkCudaErrors(cudaMemcpy2D(
     		cpu_corr,
@@ -1599,16 +1537,58 @@ int main(int argc, char **argv)
 			dstride_corr,
 			(corr_size * corr_size) * sizeof(float),
 			num_corrs,
-    		cudaMemcpyDeviceToHost));
+			cudaMemcpyDeviceToHost));
+    //    checkCudaErrors (cudaMalloc((void **)&gpu_corr_indices,        num_pairs * TILESX * TILESY*sizeof(int)));
+//    int num_tiles = TILESX * TILESYA;
+//   int num_corr_indices = num_pairs * num_tiles;
+//    int * cpu_corr_indices = (int *) malloc(num_corr_indices * sizeof(int));
+    checkCudaErrors(cudaMemcpy(
+    		cpu_corr_indices,
+			gpu_corr_indices,
+			num_corr_indices * sizeof(int),
+			cudaMemcpyDeviceToHost));
+//    int corr_img_size = num_corr_indices * 16*16; // NAN
+//    float * corr_img = (float *)malloc(corr_img_size * sizeof(float));
+    for (int i = 0; i < corr_img_size; i++){
+    	corr_img[i] = NAN;
+    }
+    for (int ict = 0; ict < num_corr_indices; ict++){
+    	//    	int ct = cpu_corr_indices[ict];
+    	int ctt = ( cpu_corr_indices[ict] >>  CORR_NTILE_SHIFT);
+    	int cpair = cpu_corr_indices[ict] & ((1 << CORR_NTILE_SHIFT) - 1);
+    	int ty = ctt / TILESX;
+    	int tx = ctt % TILESX;
+    	//		int src_offs0 = ict * num_pairs * corr_size * corr_size;
+    	int src_offs0 = ict * corr_size * corr_size;
+    	int dst_offs0 = cpair * (num_tiles * 16 * 16) +  (ty * 16 * TILESX * 16) + (tx * 16);
+
+    	for (int iy = 0; iy < corr_size; iy++){
+    		int src_offs = src_offs0 + iy * corr_size; // ict * num_pairs * corr_size * corr_size;
+    		int dst_offs = dst_offs0 + iy * (TILESX * 16);
+    		for (int ix = 0; ix < corr_size; ix++){
+    			corr_img[dst_offs++] = cpu_corr[src_offs++];
+    		}
+    	}
+    }
+    // num_pairs
 
 #ifndef NSAVE_CORR
-    		printf("Writing phase correlation data to %s\n",  result_corr_file);
+    printf("Writing phase correlation data to %s, width = %d, height=%d, slices=%d, length=%ld bytes\n",
+    		result_corr_file, (TILESX*16),(TILESYA*16), num_pairs, (corr_img_size * sizeof(float)) ) ;
+    /*
     		writeFloatsToFile(
     				cpu_corr,    // float *       data, // allocated array
 					rslt_corr_size,    // int           size, // length in elements
 					result_corr_file); // 			   const char *  path) // file path
+     */
+    writeFloatsToFile(
+    		corr_img,    // float *       data, // allocated array
+			corr_img_size,    // int           size, // length in elements
+			result_corr_file); // 			   const char *  path) // file path
 #endif
-    		free(cpu_corr);
+    free (cpu_corr);
+    free (cpu_corr_indices);
+    free (corr_img);
 #endif // ifndef NOCORR
 
 #ifndef NOCORR_TD
@@ -1637,8 +1617,8 @@ int main(int argc, char **argv)
 				color_weights[0], // 0.25,     // float             scale0,             // scale for R
 				color_weights[1], // 0.25,     // float             scale1,             // scale for B
 				color_weights[2], // 0.5,      // float             scale2,             // scale for G
-				30.0,                          // float             fat_zero,           // here - absolute
-				gpu_ftasks,                    // float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
+				30.0*30.0,                     // float             fat_zero2,          // here - absolute (squared)
+				gpu_ftasks,                    // float            * gpu_ftasks,        // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
 				tp_task_size,                  // int               num_tiles) // number of tiles in task
 				TILESX,                        // int               tilesx,             // number of tile rows
 				gpu_corr_indices,              // int             * gpu_corr_indices,   // packed tile+pair
@@ -1655,8 +1635,9 @@ int main(int argc, char **argv)
     			gpu_num_corr_tiles,
     			sizeof(int),
     			cudaMemcpyDeviceToHost));
-    	num_corr_combo = num_corrs/num_pairs;
 
+#ifdef QUAD_COMBINE
+    	num_corr_combo = num_corrs/num_pairs;
     	corr2D_combine<<<1,1>>>( // Combine quad (2 hor, 2 vert) pairs
     			num_corr_combo, // tp_task_size,     // int               num_tiles,          // number of tiles to process (each with num_pairs)
 				num_pairs,                           // int               num_pairs,          // num pairs per tile (should be the same)
@@ -1677,11 +1658,24 @@ int main(int argc, char **argv)
     			num_corr_combo, //tp_task_size,      // int               num_corr_tiles,     // number of correlation tiles to process
 				dstride_corr_combo_td/sizeof(float), // const size_t      corr_stride_td,     // in floats
 				gpu_corrs_combo_td,                  // float           * gpu_corrs_td,       // correlation tiles in transform domain
+				(float *) 0, // corr_weights,                  // float           * corr_weights,       // null or per-tile weight (fat_zero2 will be divided by it)
 				dstride_corr_combo/sizeof(float),    // const size_t      corr_stride,        // in floats
 				gpu_corrs_combo,                     // float           * gpu_corrs,          // correlation output data (pixel domain)
-				30.0,                                // float             fat_zero,           // here - absolute
+				30.0 * 30.0,                         // float             fat_zero2,           // here - absolute
 				CORR_OUT_RAD);                       // int               corr_radius);        // radius of the output correlation (7 for 15x15)
+#else
+    	checkCudaErrors(cudaDeviceSynchronize());
 
+    	corr2D_normalize<<<1,1>>>(
+    			num_corrs, //tp_task_size,           // int               num_corr_tiles,     // number of correlation tiles to process
+				dstride_corr_td/sizeof(float),       // const size_t      corr_stride_td,     // in floats
+				gpu_corrs_td,                        // float           * gpu_corrs_td,       // correlation tiles in transform domain
+				(float *) 0, // corr_weights,        // float           * corr_weights,       // null or per-tile weight (fat_zero2 will be divided by it)
+				dstride_corr/sizeof(float),          // const size_t      corr_stride,        // in floats
+				gpu_corrs,                           // float           * gpu_corrs,          // correlation output data (pixel domain)
+				30.0 * 30.0,                         // float             fat_zero2,           // here - absolute
+				CORR_OUT_RAD);                       // int               corr_radius);        // radius of the output correlation (7 for 15x15)
+#endif
     	getLastCudaError("Kernel failure:corr2D_normalize");
     	checkCudaErrors(cudaDeviceSynchronize());
     	printf("corr2D_normalize pass: %d\n",i);
@@ -1691,8 +1685,9 @@ int main(int argc, char **argv)
     sdkStopTimer(&timerCORRTD);
     float avgTimeCORRTD = (float)sdkGetTimerValue(&timerCORRTD) / (float)numIterations;
     sdkDeleteTimer(&timerCORRTD);
-    printf("Average CORR-TD and companions run time =%f ms, num cor tiles (old) = %d\n",  avgTimeCORR, num_corrs);
+    printf("Average CORR-TD and companions run time =%f ms, num cor tiles (old) = %d\n",  avgTimeCORRTD, num_corrs);
 
+#ifdef QUAD_COMBINE
     int corr_size_combo =        2 * CORR_OUT_RAD + 1;
     int rslt_corr_size_combo =   num_corr_combo * corr_size_combo * corr_size_combo;
     float * cpu_corr_combo =    (float *)malloc(rslt_corr_size_combo * sizeof(float));
@@ -1704,20 +1699,97 @@ int main(int argc, char **argv)
 			dstride_corr_combo,
 			(corr_size_combo * corr_size_combo) * sizeof(float),
 			num_corr_combo,
-    		cudaMemcpyDeviceToHost));
-//    const char* result_corr_quad_file =  "/home/eyesis/git/tile_processor_gpu/clt/main_corr-quad.corr";
-//    const char* result_corr_cross_file = "/home/eyesis/git/tile_processor_gpu/clt/main_corr-cross.corr";
+			cudaMemcpyDeviceToHost));
+    //    const char* result_corr_quad_file =  "/home/eyesis/git/tile_processor_gpu/clt/main_corr-quad.corr";
+    //    const char* result_corr_cross_file = "/home/eyesis/git/tile_processor_gpu/clt/main_corr-cross.corr";
 
 #ifndef NSAVE_CORR
-    		printf("Writing phase correlation data to %s\n",  result_corr_quad_file);
-    		writeFloatsToFile(
-    				cpu_corr_combo,         // float *       data, // allocated array
-					rslt_corr_size_combo,   // int           size, // length in elements
-					result_corr_quad_file); // 			   const char *  path) // file path
+    printf("Writing phase correlation data to %s\n",  result_corr_quad_file);
+    writeFloatsToFile(
+    		cpu_corr_combo,         // float *       data, // allocated array
+			rslt_corr_size_combo,   // int           size, // length in elements
+			result_corr_quad_file); // 			     const char *  path) // file path
 #endif
-    		free(cpu_corr_combo);
-#endif // ifndef NOCORR_TD
+    free(cpu_corr_combo);
 
+#else // QUAD_COMBINE
+    // Reading / formatting / saving 	correlate2D(TD) + corr2D_normalize
+
+    checkCudaErrors(cudaMemcpy(
+    		&num_corrs,
+			gpu_num_corr_tiles,
+			sizeof(int),
+			cudaMemcpyDeviceToHost));
+  //  printf("Average CORR run time =%f ms, num cor tiles (new) = %d\n",  avgTimeCORR, num_corrs);
+
+//    int corr_size =        2 * CORR_OUT_RAD + 1;
+//    int rslt_corr_size =   num_corrs * corr_size * corr_size;
+//    float * cpu_corr = (float *)malloc(rslt_corr_size * sizeof(float));
+
+	rslt_corr_size =   num_corrs * corr_size * corr_size;
+	corr_img_size = num_corr_indices * 16*16; // NAN
+	corr_img = (float *)malloc(corr_img_size * sizeof(float));
+	cpu_corr = (float *)malloc(rslt_corr_size * sizeof(float));
+	cpu_corr_indices = (int *) malloc(num_corr_indices * sizeof(int));
+
+
+
+    checkCudaErrors(cudaMemcpy2D(
+    		cpu_corr,
+			(corr_size * corr_size) * sizeof(float),
+			gpu_corrs,
+			dstride_corr,
+			(corr_size * corr_size) * sizeof(float),
+			num_corrs,
+			cudaMemcpyDeviceToHost));
+    //    checkCudaErrors (cudaMalloc((void **)&gpu_corr_indices,        num_pairs * TILESX * TILESY*sizeof(int)));
+//    int num_tiles = TILESX * TILESYA;
+//    int num_corr_indices = num_pairs * num_tiles;
+//    int * cpu_corr_indices = (int *) malloc(num_corr_indices * sizeof(int));
+    checkCudaErrors(cudaMemcpy(
+    		cpu_corr_indices,
+			gpu_corr_indices,
+			num_corr_indices * sizeof(int),
+			cudaMemcpyDeviceToHost));
+//    int corr_img_size = num_corr_indices * 16*16; // NAN
+//    float * corr_img = (float *)malloc(corr_img_size * sizeof(float));
+    for (int i = 0; i < corr_img_size; i++){
+    	corr_img[i] = NAN;
+    }
+    for (int ict = 0; ict < num_corr_indices; ict++){
+    	//    	int ct = cpu_corr_indices[ict];
+    	int ctt = ( cpu_corr_indices[ict] >>  CORR_NTILE_SHIFT);
+    	int cpair = cpu_corr_indices[ict] & ((1 << CORR_NTILE_SHIFT) - 1);
+    	int ty = ctt / TILESX;
+    	int tx = ctt % TILESX;
+    	//		int src_offs0 = ict * num_pairs * corr_size * corr_size;
+    	int src_offs0 = ict * corr_size * corr_size;
+    	int dst_offs0 = cpair * (num_tiles * 16 * 16) +  (ty * 16 * TILESX * 16) + (tx * 16);
+
+    	for (int iy = 0; iy < corr_size; iy++){
+    		int src_offs = src_offs0 + iy * corr_size; // ict * num_pairs * corr_size * corr_size;
+    		int dst_offs = dst_offs0 + iy * (TILESX * 16);
+    		for (int ix = 0; ix < corr_size; ix++){
+    			corr_img[dst_offs++] = cpu_corr[src_offs++];
+    		}
+    	}
+    }
+    // num_pairs
+
+#ifndef NSAVE_CORR
+    printf("Writing phase correlation data to %s, width = %d, height=%d, slices=%d, length=%ld bytes\n",
+    		result_corr_file, (TILESX*16),(TILESYA*16), num_pairs, (corr_img_size * sizeof(float)) ) ;
+    writeFloatsToFile(
+    		corr_img,                  // float *       data, // allocated array
+			corr_img_size,             // int           size, // length in elements
+			result_corr_td_norm_file); // 			   const char *  path) // file path
+#endif
+    free (cpu_corr);
+    free (cpu_corr_indices);
+    free (corr_img);
+
+#endif // // QUAD_COMBINE#else
+#endif // ifndef NOCORR_TD
 
 
 
