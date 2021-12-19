@@ -82,7 +82,8 @@ extern "C" __global__ void correlate2D(
 		int               tilesx,             // number of tile rows
 		int             * gpu_corr_indices,   // packed tile+pair
 		int             * pnum_corr_tiles,    // pointer to a number of correlation tiles to process
-		const size_t      corr_stride,        // in floats
+		size_t      corr_stride,        // in floats
+//		int               corr_stride,        // in floats
 		int               corr_radius,        // radius of the output correlation (7 for 15x15)
 		float           * gpu_corrs);          // correlation output data
 

@@ -30,7 +30,7 @@
  ** -----------------------------------------------------------------------------**
  */
 
-#define NOCORR
+// #define NOCORR
 //#define NOCORR_TD
 //#define NOTEXTURES_HOST
 #define NOTEXTURES
@@ -52,6 +52,25 @@
 #include "dtt8x8.h"
 #include "geometry_correction.h"
 #include "TileProcessor.cuh"
+
+#if TEST_LWIR
+	#define IMG_WIDTH                   640
+	#define IMG_HEIGHT                  512
+	#define KERNELS_HOR                 82 // 80+2
+	#define KERNELS_VERT                66 // 64+2
+#else
+	#define IMG_WIDTH                  2592
+	#define IMG_HEIGHT                 1936
+	#define KERNELS_HOR                 164  // 2592 / 16 + 2
+	#define KERNELS_VERT                123  // 1936 / 16 + 2
+#endif
+#define CORR_OUT_RAD                   7 // full tile (15x15), was 4 (9x9)
+#define DBG_DISPARITY                  0.0 // 56.0//   0.0 // 56.0 // disparity for which to calculate offsets (not needed in Java)
+// only used in C++ test
+#define TILESX        (IMG_WIDTH / DTT_SIZE)
+#define TILESY        (IMG_HEIGHT / DTT_SIZE)
+#define TILESYA       ((TILESY +3) & (~3))
+
 
 
 float * copyalloc_kernel_gpu(float * kernel_host,
@@ -1259,23 +1278,9 @@ int main(int argc, char **argv)
 	struct tp_task * old_task = &task_data [DBG_TILE];
 	struct tp_task * new_task = &task_data1[DBG_TILE];
 #endif
-//    printf("old_task txy = 0x%x\n",  task_data [DBG_TILE].txy);
-//    printf("new_task txy = 0x%x\n",  task_data1[DBG_TILE].txy);
+#ifdef 	DBG_TILE
     printf("old_task txy = 0x%x\n", *(int *) (ftask_data + task_size * DBG_TILE + 1)) ; // task_data [DBG_TILE].txy);
     printf("new_task txy = 0x%x\n", *(int *) (ftask_data1 + task_size * DBG_TILE + 1)) ; // task_data1[DBG_TILE].txy);
-
-    /*
-    for (int ncam = 0; ncam < NUM_CAMS; ncam++){
-        printf("camera %d pX old %f new %f diff = %f\n", ncam,
-        		task_data [DBG_TILE].xy[ncam][0],  task_data1[DBG_TILE].xy[ncam][0],
-				task_data [DBG_TILE].xy[ncam][0] - task_data1[DBG_TILE].xy[ncam][0]);
-        printf("camera %d pY old %f new %f diff = %f\n", ncam,
-        		task_data [DBG_TILE].xy[ncam][1],  task_data1[DBG_TILE].xy[ncam][1],
-				task_data [DBG_TILE].xy[ncam][1]-  task_data1[DBG_TILE].xy[ncam][1]);
-    }
-    */
-
-    //  for (int ncam = 0; ncam < NUM_CAMS; ncam++){
         for (int ncam = 0; ncam < num_cams; ncam++){
             printf("camera %d pX old %f new %f diff = %f\n", ncam,
             		 *(ftask_data  + task_size * DBG_TILE + tp_task_xy_offset + 2*ncam + 0),
@@ -1288,16 +1293,7 @@ int main(int argc, char **argv)
            		 (*(ftask_data + task_size * DBG_TILE + tp_task_xy_offset + 2*ncam + 1)) -
            		 (*(ftask_data1 + task_size * DBG_TILE + tp_task_xy_offset + 2*ncam + 1)));
         }
-
-
-#if 0
-    // temporarily restore tasks
-    checkCudaErrors(cudaMemcpy(
-    		gpu_tasks,
-			&task_data,
-			tp_task_size * sizeof(struct tp_task),
-            cudaMemcpyHostToDevice));
-#endif
+#endif //#ifdef 	DBG_TILE
 #endif // TEST_GEOM_CORR
 
 
@@ -1305,13 +1301,8 @@ int main(int argc, char **argv)
     StopWatchInterface *timerTP = 0;
     sdkCreateTimer(&timerTP);
 
-#if 0
-    dim3 threads_tp(THREADSX, TILES_PER_BLOCK, 1);
-    dim3 grid_tp((tp_task_size + TILES_PER_BLOCK -1 )/TILES_PER_BLOCK, 1);
-#else
     dim3 threads_tp(1, 1, 1);
     dim3 grid_tp(1, 1, 1);
-#endif
     printf("threads_tp=(%d, %d, %d)\n",threads_tp.x,threads_tp.y,threads_tp.z);
     printf("grid_tp=   (%d, %d, %d)\n",grid_tp.x,   grid_tp.y,   grid_tp.z);
 
@@ -1333,7 +1324,6 @@ int main(int argc, char **argv)
 				gpu_kernels,           // float           ** gpu_kernels,
 				gpu_images,            // float           ** gpu_images,
 				gpu_ftasks,            // float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
-//				gpu_tasks,             // struct tp_task   * gpu_tasks,
 				gpu_clt,               // float           ** gpu_clt,            // [num_cams][TILESY][TILESX][num_colors][DTT_SIZE*DTT_SIZE]
 				dstride/sizeof(float), // size_t             dstride, // for gpu_images
 				tp_task_size,          // int                num_tiles) // number of tiles in task
@@ -1373,12 +1363,10 @@ int main(int argc, char **argv)
 				gpu_clt_h[ncam],
 				rslt_size * sizeof(float),
     			cudaMemcpyDeviceToHost));
-//#ifndef DBG_TILE
         printf("Writing CLT data to %s\n",  ports_clt_file[ncam]);
     	writeFloatsToFile(cpu_clt, // float *       data, // allocated array
     			rslt_size, // int           size, // length in elements
 				ports_clt_file[ncam]); // 			   const char *  path) // file path
-//#endif
     }
 #endif
 
@@ -1453,14 +1441,11 @@ int main(int argc, char **argv)
 //				3* (IMG_HEIGHT + DTT_SIZE),
 				num_colors* (IMG_HEIGHT + DTT_SIZE),
     			cudaMemcpyDeviceToHost));
-
-///#ifndef DBG_TILE
         printf("Writing RBG data to %s\n",  result_rbg_file[ncam]);
     	writeFloatsToFile( // will have margins
     			cpu_corr_image, // float *       data, // allocated array
 				rslt_img_size, // int           size, // length in elements
 				result_rbg_file[ncam]); // 			   const char *  path) // file path
-///#endif
     }
 
     free(cpu_corr_image);
@@ -1482,7 +1467,6 @@ int main(int argc, char **argv)
     	}
     	correlate2D<<<1,1>>>(
     			num_cams,                      // int               num_cams,
-//				0,                             // int *             sel_pairs,           // unused bits should be 0
 				sel_pairs[0], // int               sel_pairs0           // unused bits should be 0
 				sel_pairs[1], // int               sel_pairs1,           // unused bits should be 0
 				sel_pairs[2], // int               sel_pairs2,           // unused bits should be 0
@@ -1778,7 +1762,7 @@ int main(int argc, char **argv)
 
 #ifndef NSAVE_CORR
     printf("Writing phase correlation data to %s, width = %d, height=%d, slices=%d, length=%ld bytes\n",
-    		result_corr_file, (TILESX*16),(TILESYA*16), num_pairs, (corr_img_size * sizeof(float)) ) ;
+    		result_corr_td_norm_file, (TILESX*16),(TILESYA*16), num_pairs, (corr_img_size * sizeof(float)) ) ;
     writeFloatsToFile(
     		corr_img,                  // float *       data, // allocated array
 			corr_img_size,             // int           size, // length in elements
@@ -1985,8 +1969,7 @@ int main(int argc, char **argv)
     		    				cpu_diff_rgb_combo_out, // cpu_diff_rgb_combo,    // float *       data, // allocated array
     							diff_rgb_combo_size,    // int           size, // length in elements
     							result_diff_rgb_combo_file); // 			   const char *  path) // file path
-
-    		//DBG_TILE
+#ifdef 	DBG_TILE
     		#ifdef DEBUG10
     		    		int texture_offset = DBG_TILE * tile_texture_size;
     		    		int chn = 0;
@@ -2002,6 +1985,7 @@ int main(int argc, char **argv)
     		    			}
     		    		}
     		#endif // DEBUG9
+#endif //#ifdef 	DBG_TILE
     		#endif
     		    		free(cpu_textures);
     		    		free (cpu_diff_rgb_combo);
@@ -2108,7 +2092,7 @@ int main(int argc, char **argv)
 					diff_rgb_combo_size,    // int           size, // length in elements
 					result_diff_rgb_combo_file); // 			   const char *  path) // file path
 
-//DBG_TILE
+#ifdef 	DBG_TILE
 #ifdef DEBUG10
     		int texture_offset = DBG_TILE * tile_texture_size;
     		int chn = 0;
@@ -2124,6 +2108,8 @@ int main(int argc, char **argv)
     			}
     		}
 #endif // DEBUG9
+#endif //#ifdef 	DBG_TILE
+
 #endif
     		free(cpu_textures);
     		free (cpu_diff_rgb_combo);
@@ -2243,6 +2229,8 @@ int main(int argc, char **argv)
 			rslt_rgba_size,    // int           size, // length in elements
 			result_textures_rgba_file); // 			   const char *  path) // file path
 #endif
+
+#ifdef 	DBG_TILE
 #ifdef DEBUG11
     int rgba_offset = (DBG_TILE_Y - cpu_woi[1]) * DTT_SIZE * rgba_woi_width  + (DBG_TILE_X - cpu_woi[0]);
     for (int chn = 0; chn < rbga_slices; chn++){
@@ -2257,6 +2245,7 @@ int main(int argc, char **argv)
     	}
     }
 #endif // DEBUG11
+#endif //#ifdef 	DBG_TILE
     free(cpu_textures_rgba);
 #endif // ifndef NOTEXTURES
 
