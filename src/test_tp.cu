@@ -2077,7 +2077,6 @@ int main(int argc, char **argv)
     			num_cams,              // int                num_cams,           // number of cameras used
     	// Parameters to generate texture tasks
 				gpu_ftasks,         // float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
-//                gpu_tasks,             // struct tp_task   * gpu_tasks,
                 tp_task_size,          // int                num_tiles,          // number of tiles in task list
 		// Does not require initialized gpu_texture_indices to be initialized - just allocated, will generate.
 	            gpu_texture_indices,   // int              * gpu_texture_indices,// packed tile + bits (now only (1 << 7)
@@ -2090,9 +2089,7 @@ int main(int argc, char **argv)
 				gpu_geometry_correction, // struct gc     * gpu_geometry_correction,
 	            texture_colors,        // int               colors,             // number of colors (3/1)
 	            (texture_colors == 1), // int               is_lwir,            // do not perform shot correction
-//				gpu_generate_RBGA_params,
 				generate_RBGA_params, //		float             cpu_params[5],      // mitigating CUDA_ERROR_INVALID_PTX
-
 				gpu_color_weights,     // float             weights[3],         // scale for R
 	            1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
 	            0,                     // int               keep_weights,       // return channel weights after A in RGBA
