@@ -45,7 +45,7 @@
 //#define NUM_PAIRS                      6
 //#define NUM_COLORS                     1 //3
 // kernels [num_cams][num_colors][KERNELS_HOR][KERNELS_VERT][4][64]
-#define TEST_LWIR                      1
+//#define TEST_LWIR                      1
 #define KERNELS_LSTEP                  4
 #define THREADS_PER_TILE               8
 #define TILES_PER_BLOCK                4
@@ -79,7 +79,7 @@
 #define RBYRDIST_STEP                  0.0004 // for doubles, 0.0002 - floats // to fit into GPU shared memory (was 0.001);
 #define TILES_PER_BLOCK_GEOM          (32/NUM_CAMS)   // each tile has NUM_CAMS threads
 
-
+#define DEBUG_ANY 1
 
 #ifdef 	DEBUG_ANY
 //#define DEBUG_OOB1 1
