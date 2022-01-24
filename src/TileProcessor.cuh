@@ -2810,7 +2810,7 @@ __global__ void convert_correct_tiles(
  * @param dust_remove          do not reduce average weight when only one image differs much from the average (true)
  * @param texture_stride       output stride in floats (now 256*4 = 1024)
  * @param gpu_texture_tiles    output array (number of colors +1 + ?)*16*16 rgba texture tiles) float values. Will not be calculated if null
- * @param inescan_order        0 low-res tiles have tghe same order, as gpu_texture_indices, 1 - in linescan order
+ * @param inescan_order        0 low-res tiles have the same order, as gpu_texture_indices, 1 - in linescan order
  * @param gpu_diff_rgb_combo   low-resolution output, with per-camera mismatch an each color average. Will not be calculated if null
  * @param num_tilesx           number of tiles in a row
  */
