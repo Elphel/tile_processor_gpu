@@ -45,57 +45,56 @@
 * with Nvidia Nsight, driver API when calling these kernels from Java
 */
 #ifndef JCUDA
-#define DTT_SIZE_LOG2                 3
+#define DTT_SIZE_LOG2 3
 #endif
 
 #pragma once
-#define DTT_SIZE                     (1 << DTT_SIZE_LOG2)
-#define DTT_SIZE1        (DTT_SIZE + 1)
-#define DTT_SIZE2        (2 * DTT_SIZE)
-#define DTT_SIZE21       (DTT_SIZE2 + 1)
-#define DTT_SIZE4        (4 * DTT_SIZE)
-#define DTT_SIZE2M1      (DTT_SIZE2 - 1)
-#define BAYER_RED   0
-#define BAYER_BLUE  1
+#define DTT_SIZE (1 << DTT_SIZE_LOG2)
+#define DTT_SIZE1 (DTT_SIZE + 1)
+#define DTT_SIZE2 (2 * DTT_SIZE)
+#define DTT_SIZE21 (DTT_SIZE2 + 1)
+#define DTT_SIZE4 (4 * DTT_SIZE)
+#define DTT_SIZE2M1 (DTT_SIZE2 - 1)
+#define BAYER_RED 0
+#define BAYER_BLUE 1
 #define BAYER_GREEN 2
 // assuming GR/BG as now
 #define BAYER_RED_ROW 0
 #define BAYER_RED_COL 1
 
-#define DTTTEST_BLOCK_WIDTH          32
-#define DTTTEST_BLOCK_HEIGHT         16
-#define DTTTEST_BLK_STRIDE     (DTTTEST_BLOCK_WIDTH+1)
+#define DTTTEST_BLOCK_WIDTH 32
+#define DTTTEST_BLOCK_HEIGHT 16
+#define DTTTEST_BLK_STRIDE (DTTTEST_BLOCK_WIDTH + 1)
 
-//extern __constant__ float idct_signs[4][4][4];
-//extern __constant__ int imclt_indx9[16];
-//extern __constant__ float HWINDOW2[];
-
+// extern __constant__ float idct_signs[4][4][4];
+// extern __constant__ int imclt_indx9[16];
+// extern __constant__ float HWINDOW2[];
 
 // kernels (not used so far)
 #if 0
 extern "C" __global__ void GPU_DTT24_DRV(float *dst, float *src, int src_stride, int dtt_mode);
-#endif// #if 0
+#endif  // #if 0
 
 //=========================== 2D functions ===============
 extern __device__ void corrUnfoldTile(
-		int corr_radius,
-		float* qdata0, //    [4][DTT_SIZE][DTT_SIZE1], // 4 quadrants of the clt data, rows extended to optimize shared ports
-		float* rslt);  //   [DTT_SIZE2M1][DTT_SIZE2M1]) // 15x15
+    int corr_radius,
+    float* qdata0,  //    [4][DTT_SIZE][DTT_SIZE1], // 4 quadrants of the clt data, rows extended to optimize shared ports
+    float* rslt);   //   [DTT_SIZE2M1][DTT_SIZE2M1]) // 15x15
 
 extern __device__ void dttii_2d(
-		float * clt_corr); // shared memory, [4][DTT_SIZE1][DTT_SIZE]
+    float* clt_corr);  // shared memory, [4][DTT_SIZE1][DTT_SIZE]
 
 extern __device__ void dttiv_color_2d(
-		float * clt_tile,
-		int color);
+    float* clt_tile,
+    int color);
 extern __device__ void dttiv_mono_2d(
-		float * clt_tile);
+    float* clt_tile);
 extern __device__ void imclt(
-		float * clt_tile,   //        [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports [4][8][9]
-		float * mclt_tile );
+    float* clt_tile,  //        [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports [4][8][9]
+    float* mclt_tile);
 
 extern __device__ void imclt8threads(
-		int     do_acc,     // 1 - add to previous value, 0 - overwrite
-		float * clt_tile,   //        [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports [4][8][9]
-		float * mclt_tile,  //           [2* DTT_SIZE][DTT_SIZE1+ DTT_SIZE], // +1 to alternate column ports[16][17]
-		int     debug);
+    int do_acc,        // 1 - add to previous value, 0 - overwrite
+    float* clt_tile,   //        [4][DTT_SIZE][DTT_SIZE1], // +1 to alternate column ports [4][8][9]
+    float* mclt_tile,  //           [2* DTT_SIZE][DTT_SIZE1+ DTT_SIZE], // +1 to alternate column ports[16][17]
+    int debug);

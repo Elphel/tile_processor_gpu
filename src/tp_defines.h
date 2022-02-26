@@ -39,61 +39,61 @@
 // Avoiding includes in jcuda, all source files will be merged
 #pragma once
 #ifndef JCUDA
-#define TEST_LWIR                      1
+#define TEST_LWIR 1
 #include <stdio.h>
-#define THREADSX              (DTT_SIZE)
-#define NUM_CAMS                      16 // now maximal number of cameras
+#define THREADSX (DTT_SIZE)
+#define NUM_CAMS 16  // now maximal number of cameras
 //#define NUM_PAIRS                      6
 //#define NUM_COLORS                     1 //3
 // kernels [num_cams][num_colors][KERNELS_HOR][KERNELS_VERT][4][64]
-#define KERNELS_LSTEP                  4
-#define THREADS_PER_TILE               8
-#define TILES_PER_BLOCK                4
-#define CORR_THREADS_PER_TILE          8
-#define CORR_TILES_PER_BLOCK           4
-#define CORR_TILES_PER_BLOCK_NORMALIZE 4 // increase to 8?
-#define CORR_TILES_PER_BLOCK_COMBINE   4 // increase to 16?
+#define KERNELS_LSTEP 4
+#define THREADS_PER_TILE 8
+#define TILES_PER_BLOCK 4
+#define CORR_THREADS_PER_TILE 8
+#define CORR_TILES_PER_BLOCK 4
+#define CORR_TILES_PER_BLOCK_NORMALIZE 4  // increase to 8?
+#define CORR_TILES_PER_BLOCK_COMBINE 4    // increase to 16?
 //#define TEXTURE_THREADS               32 //
-#define NUM_THREADS                   32
-#define TEXTURE_THREADS_PER_TILE       8
-#define TEXTURE_TILES_PER_BLOCK        1
-#define IMCLT_THREADS_PER_TILE        16
-#define IMCLT_TILES_PER_BLOCK          4
-#define CORR_NTILE_SHIFT               8 // higher bits - number of a pair, other bits tile number
+#define NUM_THREADS 32
+#define TEXTURE_THREADS_PER_TILE 8
+#define TEXTURE_TILES_PER_BLOCK 1
+#define IMCLT_THREADS_PER_TILE 16
+#define IMCLT_TILES_PER_BLOCK 4
+#define CORR_NTILE_SHIFT 8  // higher bits - number of a pair, other bits tile number
 // only lower bit will be used to request correlations, correlation mask will be common for all the scene
 //#define CORR_PAIRS_MASK             0x3f// lower bits used to address correlation pair for the selected tile
-#define CORR_TEXTURE_BIT               7 // bit 7 used to request texture for the tile
-#define TASK_CORR_BITS                 4
-#define TASK_TEXTURE_N_BIT             0 // Texture with North neighbor
-#define TASK_TEXTURE_E_BIT             1 // Texture with East  neighbor
-#define TASK_TEXTURE_S_BIT             2 // Texture with South neighbor
-#define TASK_TEXTURE_W_BIT             3 // Texture with West  neighbor
+#define CORR_TEXTURE_BIT 7  // bit 7 used to request texture for the tile
+#define TASK_CORR_BITS 4
+#define TASK_TEXTURE_N_BIT 0  // Texture with North neighbor
+#define TASK_TEXTURE_E_BIT 1  // Texture with East  neighbor
+#define TASK_TEXTURE_S_BIT 2  // Texture with South neighbor
+#define TASK_TEXTURE_W_BIT 3  // Texture with West  neighbor
 //#define TASK_TEXTURE_BIT               3 // bit to request texture calculation int task field of struct tp_task
-#define LIST_TEXTURE_BIT               7 // bit to request texture calculation
+#define LIST_TEXTURE_BIT 7  // bit to request texture calculation
 //#define CORR_OUT_RAD                 7 // full tile (15x15), was 4 (9x9)
-#define FAT_ZERO_WEIGHT                0.0001 // add to port weights to avoid nan
+#define FAT_ZERO_WEIGHT 0.0001  // add to port weights to avoid nan
 
-#define THREADS_DYNAMIC_BITS           5 // treads in block for CDP creation of the texture list
+#define THREADS_DYNAMIC_BITS 5  // treads in block for CDP creation of the texture list
 
-#define RBYRDIST_LEN                5001   // for doubles 10001 - floats   // length of rByRDist to allocate shared memory
-#define RBYRDIST_STEP                  0.0004 // for doubles, 0.0002 - floats // to fit into GPU shared memory (was 0.001);
-#define TILES_PER_BLOCK_GEOM          (32/NUM_CAMS)   // each tile has NUM_CAMS threads
+#define RBYRDIST_LEN 5001                     // for doubles 10001 - floats   // length of rByRDist to allocate shared memory
+#define RBYRDIST_STEP 0.0004                  // for doubles, 0.0002 - floats // to fit into GPU shared memory (was 0.001);
+#define TILES_PER_BLOCK_GEOM (32 / NUM_CAMS)  // each tile has NUM_CAMS threads
 
 #define DEBUG_ANY 1
 
-#ifdef 	DEBUG_ANY
+#ifdef DEBUG_ANY
 //#define DEBUG_OOB1 1
 // Use CORR_OUT_RAD for the correlation output
 //#define DBG_TILE_X     40
 //#define DBG_TILE_Y     80
 #if TEST_LWIR
-	#define DBG_TILE_X    50 // 52 // 32 // 162 // 151 // 161 // 49
-	#define DBG_TILE_Y    19 //  5 // 36 // 88 // 121 // 69  // 111 // 66
-	#define DBG_TILE    (DBG_TILE_Y * 80 + DBG_TILE_X)
+#define DBG_TILE_X 50  // 52 // 32 // 162 // 151 // 161 // 49
+#define DBG_TILE_Y 19  //  5 // 36 // 88 // 121 // 69  // 111 // 66
+#define DBG_TILE (DBG_TILE_Y * 80 + DBG_TILE_X)
 #else
-	#define DBG_TILE_X     114 // 32 // 162 // 151 // 161 // 49
-	#define DBG_TILE_Y     51  // 52  // 88 // 121 // 69  // 111 // 66
-	#define DBG_TILE    (DBG_TILE_Y * 324 + DBG_TILE_X)
+#define DBG_TILE_X 114  // 32 // 162 // 151 // 161 // 49
+#define DBG_TILE_Y 51   // 52  // 88 // 121 // 69  // 111 // 66
+#define DBG_TILE (DBG_TILE_Y * 324 + DBG_TILE_X)
 #endif
 #undef DBG_MARK_DBG_TILE
 //#undef DBG_TILE
@@ -101,8 +101,7 @@
 //#undef HAS_PRINTF
 #define HAS_PRINTF
 
-
-//7
+// 7
 //#define DEBUG1 1
 //#define DEBUG2 1
 //#define DEBUG3 1
@@ -118,7 +117,7 @@
 #define DEBUG9 1
 */
 //#define DEBUG8A 1 // generate_RBGA_host
-//textures
+// textures
 //#define DEBUG10 1
 //#define DEBUG11 1
 //#define DEBUG12 1
@@ -126,7 +125,6 @@
 //#define DEBUG_OOB1 1
 // geom
 //#define DEBUG20 1
-
 
 #if (DBG_TILE_X >= 0) && (DBG_TILE_Y >= 0)
 //#define DEBUG20 1 // Geometry Correction
@@ -136,10 +134,8 @@
 //#define DEBUG22 1
 //#define DEBUG23 1
 
-#endif //#if (DBG_TILE_X >= 0) && (DBG_TILE_Y >= 0)
+#endif  //#if (DBG_TILE_X >= 0) && (DBG_TILE_Y >= 0)
 
-#endif //#ifdef 	DEBUG_ANY
+#endif  //#ifdef 	DEBUG_ANY
 
-
-#endif //#ifndef JCUDA
-
+#endif  //#ifndef JCUDA
