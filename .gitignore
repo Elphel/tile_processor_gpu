@@ -12,3 +12,7 @@ attic
 /clt
 /clt_big_endian
 /*-old
+
+
+.vscode/
+[Bb][Uu][Ii][Ll][Db]/
