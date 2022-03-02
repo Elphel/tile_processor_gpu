@@ -73,7 +73,7 @@
 #define TILESYA ((TILESY + 3) & (~3))
 
 #ifndef CLT_BASE_PATH
-#define CLT_BASE_PATH "../../clt/"
+#define CLT_BASE_PATH "clt/"
 #endif
 
 float *copyalloc_kernel_gpu(float *kernel_host,
