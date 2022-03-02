@@ -13,29 +13,41 @@ if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             RESULT_VARIABLE GIT_SUBMOD_RESULT)
         if(NOT GIT_SUBMOD_RESULT EQUAL "0")
-            message(FATAL_ERROR "git submodule update --init --recursive failed with ${GIT_SUBMOD_RESULT}, please checkout submodules")
+            message(
+                FATAL_ERROR
+                "git submodule update --init --recursive failed with ${GIT_SUBMOD_RESULT}, please checkout submodules")
         endif()
     endif()
 endif()
 
+# Check submodules
+foreach(SUBMOD IN LISTS "cuda-samples")
+    if(NOT EXISTS "${PROJECT_SOURCE_DIR}/external/${SUBMOD}/README.md")
+        message(
+            FATAL_ERROR 
+            "The submodule ${SUBMOD} was not found, check git submodules.")
+    endif()
+endforeach()
 
-if(NOT EXISTS "${PROJECT_SOURCE_DIR}/external/cuda-samples/README.md")
-    message(FATAL_ERROR "The submodule cuda-samples was not downloaded! GIT_SUBMODULE was turned off or failed. Please update submodules and try again.")
-endif()
 
-# create the executable
-add_executable(${PROJECT_NAME}
-    src/test_tp.cu
+include(CTest)
+
+# set(CMAKE_CUDA_FLAGS "-gencode arch=compute_75,code=sm_75")
+
+# create the source files as a lib
+add_library(src_files STATIC
     src/dtt8x8.cu
     src/dtt8x8.h
     src/geometry_correction.cu
     src/geometry_correction.h
-    src/test_tp.cu
     src/TileProcessor.cuh
     src/TileProcessor.h
     src/tp_defines.h)
+# target_compile_features(src_files PUBLIC cxx_std_11)
+set_target_properties(src_files PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+
+# make tests executable
+add_executable(${PROJECT_NAME} src/test_tp.cu)
 include_directories(external/cuda-samples/Common)
-set_target_properties(${PROJECT_NAME}
-    PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-
-
+set_property(TARGET ${PROJECT_NAME} PROPERTY CUDA_SEPARABLE_COMPILATION ON)
+target_link_libraries(${PROJECT_NAME} PRIVATE src_files)
