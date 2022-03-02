@@ -1060,7 +1060,7 @@ __device__ int get_textures_shared_size(  // in bytes
  * @param scale2           scale green (if colors = 3) component before mixing
  * @param fat_zero2        add this value squared to the sum of squared components before normalization (squared)
  * @param gpu_ftasks           flattened tasks, 29 floats for quad EO, 101 floats for LWIR16
-// * @param gpu_tasks        array of per-tile tasks (now bits 4..9 - correlation pairs)
+ * @param gpu_tasks        array of per-tile tasks (now bits 4..9 - correlation pairs)
  * @param num_tiles        number of tiles int gpu_tasks array prepared for processing
  * @param tilesx           number of tile rows
  * @param gpu_corr_indices allocated array for per-tile correlation tasks (4 bytes per tile)

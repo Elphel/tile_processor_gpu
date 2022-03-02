@@ -72,6 +72,10 @@
 #define TILESY (IMG_HEIGHT / DTT_SIZE)
 #define TILESYA ((TILESY + 3) & (~3))
 
+#ifndef CLT_BASE_PATH
+#define CLT_BASE_PATH "../../clt/"
+#endif
+
 float *copyalloc_kernel_gpu(float *kernel_host,
                             int size,  // size in floats
                             int full_size) {
@@ -543,131 +547,131 @@ int main(int argc, char **argv) {
 
 #if TEST_LWIR
     const char *kernel_file[] = {
-        "../../clt/aux_chn0_transposed.kernel",
-        "../../clt/aux_chn1_transposed.kernel",
-        "../../clt/aux_chn2_transposed.kernel",
-        "../../clt/aux_chn3_transposed.kernel",
-        "../../clt/aux_chn4_transposed.kernel",
-        "../../clt/aux_chn5_transposed.kernel",
-        "../../clt/aux_chn6_transposed.kernel",
-        "../../clt/aux_chn7_transposed.kernel",
-        "../../clt/aux_chn8_transposed.kernel",
-        "../../clt/aux_chn9_transposed.kernel",
-        "../../clt/aux_chn10_transposed.kernel",
-        "../../clt/aux_chn11_transposed.kernel",
-        "../../clt/aux_chn12_transposed.kernel",
-        "../../clt/aux_chn13_transposed.kernel",
-        "../../clt/aux_chn14_transposed.kernel",
-        "../../clt/aux_chn15_transposed.kernel"};
+        CLT_BASE_PATH "aux_chn0_transposed.kernel",
+        CLT_BASE_PATH "aux_chn1_transposed.kernel",
+        CLT_BASE_PATH "aux_chn2_transposed.kernel",
+        CLT_BASE_PATH "aux_chn3_transposed.kernel",
+        CLT_BASE_PATH "aux_chn4_transposed.kernel",
+        CLT_BASE_PATH "aux_chn5_transposed.kernel",
+        CLT_BASE_PATH "aux_chn6_transposed.kernel",
+        CLT_BASE_PATH "aux_chn7_transposed.kernel",
+        CLT_BASE_PATH "aux_chn8_transposed.kernel",
+        CLT_BASE_PATH "aux_chn9_transposed.kernel",
+        CLT_BASE_PATH "aux_chn10_transposed.kernel",
+        CLT_BASE_PATH "aux_chn11_transposed.kernel",
+        CLT_BASE_PATH "aux_chn12_transposed.kernel",
+        CLT_BASE_PATH "aux_chn13_transposed.kernel",
+        CLT_BASE_PATH "aux_chn14_transposed.kernel",
+        CLT_BASE_PATH "aux_chn15_transposed.kernel"};
 
     const char *kernel_offs_file[] = {
-        "../../clt/aux_chn0_transposed.kernel_offsets",
-        "../../clt/aux_chn1_transposed.kernel_offsets",
-        "../../clt/aux_chn2_transposed.kernel_offsets",
-        "../../clt/aux_chn3_transposed.kernel_offsets",
-        "../../clt/aux_chn4_transposed.kernel_offsets",
-        "../../clt/aux_chn5_transposed.kernel_offsets",
-        "../../clt/aux_chn6_transposed.kernel_offsets",
-        "../../clt/aux_chn7_transposed.kernel_offsets",
-        "../../clt/aux_chn8_transposed.kernel_offsets",
-        "../../clt/aux_chn9_transposed.kernel_offsets",
-        "../../clt/aux_chn10_transposed.kernel_offsets",
-        "../../clt/aux_chn11_transposed.kernel_offsets",
-        "../../clt/aux_chn12_transposed.kernel_offsets",
-        "../../clt/aux_chn13_transposed.kernel_offsets",
-        "../../clt/aux_chn14_transposed.kernel_offsets",
-        "../../clt/aux_chn15_transposed.kernel_offsets"};
+        CLT_BASE_PATH "aux_chn0_transposed.kernel_offsets",
+        CLT_BASE_PATH "aux_chn1_transposed.kernel_offsets",
+        CLT_BASE_PATH "aux_chn2_transposed.kernel_offsets",
+        CLT_BASE_PATH "aux_chn3_transposed.kernel_offsets",
+        CLT_BASE_PATH "aux_chn4_transposed.kernel_offsets",
+        CLT_BASE_PATH "aux_chn5_transposed.kernel_offsets",
+        CLT_BASE_PATH "aux_chn6_transposed.kernel_offsets",
+        CLT_BASE_PATH "aux_chn7_transposed.kernel_offsets",
+        CLT_BASE_PATH "aux_chn8_transposed.kernel_offsets",
+        CLT_BASE_PATH "aux_chn9_transposed.kernel_offsets",
+        CLT_BASE_PATH "aux_chn10_transposed.kernel_offsets",
+        CLT_BASE_PATH "aux_chn11_transposed.kernel_offsets",
+        CLT_BASE_PATH "aux_chn12_transposed.kernel_offsets",
+        CLT_BASE_PATH "aux_chn13_transposed.kernel_offsets",
+        CLT_BASE_PATH "aux_chn14_transposed.kernel_offsets",
+        CLT_BASE_PATH "aux_chn15_transposed.kernel_offsets"};
 
     const char *image_files[] = {
-        "../../clt/aux_chn0.bayer",
-        "../../clt/aux_chn1.bayer",
-        "../../clt/aux_chn2.bayer",
-        "../../clt/aux_chn3.bayer",
-        "../../clt/aux_chn4.bayer",
-        "../../clt/aux_chn5.bayer",
-        "../../clt/aux_chn6.bayer",
-        "../../clt/aux_chn7.bayer",
-        "../../clt/aux_chn8.bayer",
-        "../../clt/aux_chn9.bayer",
-        "../../clt/aux_chn10.bayer",
-        "../../clt/aux_chn11.bayer",
-        "../../clt/aux_chn12.bayer",
-        "../../clt/aux_chn13.bayer",
-        "../../clt/aux_chn14.bayer",
-        "../../clt/aux_chn15.bayer"};
+        CLT_BASE_PATH "aux_chn0.bayer",
+        CLT_BASE_PATH "aux_chn1.bayer",
+        CLT_BASE_PATH "aux_chn2.bayer",
+        CLT_BASE_PATH "aux_chn3.bayer",
+        CLT_BASE_PATH "aux_chn4.bayer",
+        CLT_BASE_PATH "aux_chn5.bayer",
+        CLT_BASE_PATH "aux_chn6.bayer",
+        CLT_BASE_PATH "aux_chn7.bayer",
+        CLT_BASE_PATH "aux_chn8.bayer",
+        CLT_BASE_PATH "aux_chn9.bayer",
+        CLT_BASE_PATH "aux_chn10.bayer",
+        CLT_BASE_PATH "aux_chn11.bayer",
+        CLT_BASE_PATH "aux_chn12.bayer",
+        CLT_BASE_PATH "aux_chn13.bayer",
+        CLT_BASE_PATH "aux_chn14.bayer",
+        CLT_BASE_PATH "aux_chn15.bayer"};
 
     const char *ports_offs_xy_file[] = {
-        "../../clt/aux_chn0.portsxy",
-        "../../clt/aux_chn1.portsxy",
-        "../../clt/aux_chn2.portsxy",
-        "../../clt/aux_chn3.portsxy",
-        "../../clt/aux_chn4.portsxy",
-        "../../clt/aux_chn5.portsxy",
-        "../../clt/aux_chn6.portsxy",
-        "../../clt/aux_chn7.portsxy",
-        "../../clt/aux_chn8.portsxy",
-        "../../clt/aux_chn9.portsxy",
-        "../../clt/aux_chn10.portsxy",
-        "../../clt/aux_chn11.portsxy",
-        "../../clt/aux_chn12.portsxy",
-        "../../clt/aux_chn13.portsxy",
-        "../../clt/aux_chn14.portsxy",
-        "../../clt/aux_chn15.portsxy"};
+        CLT_BASE_PATH "aux_chn0.portsxy",
+        CLT_BASE_PATH "aux_chn1.portsxy",
+        CLT_BASE_PATH "aux_chn2.portsxy",
+        CLT_BASE_PATH "aux_chn3.portsxy",
+        CLT_BASE_PATH "aux_chn4.portsxy",
+        CLT_BASE_PATH "aux_chn5.portsxy",
+        CLT_BASE_PATH "aux_chn6.portsxy",
+        CLT_BASE_PATH "aux_chn7.portsxy",
+        CLT_BASE_PATH "aux_chn8.portsxy",
+        CLT_BASE_PATH "aux_chn9.portsxy",
+        CLT_BASE_PATH "aux_chn10.portsxy",
+        CLT_BASE_PATH "aux_chn11.portsxy",
+        CLT_BASE_PATH "aux_chn12.portsxy",
+        CLT_BASE_PATH "aux_chn13.portsxy",
+        CLT_BASE_PATH "aux_chn14.portsxy",
+        CLT_BASE_PATH "aux_chn15.portsxy"};
 
 //#ifndef DBG_TILE
 #ifdef SAVE_CLT
     const char *ports_clt_file[] = {// never referenced
-                                    "../../clt/aux_chn0.clt",
-                                    "../../clt/aux_chn1.clt",
-                                    "../../clt/aux_chn2.clt",
-                                    "../../clt/aux_chn3.clt",
-                                    "../../clt/aux_chn4.clt",
-                                    "../../clt/aux_chn5.clt",
-                                    "../../clt/aux_chn6.clt",
-                                    "../../clt/aux_chn7.clt",
-                                    "../../clt/aux_chn8.clt",
-                                    "../../clt/aux_chn9.clt",
-                                    "../../clt/aux_chn10.clt",
-                                    "../../clt/aux_chn11.clt",
-                                    "../../clt/aux_chn12.clt",
-                                    "../../clt/aux_chn13.clt",
-                                    "../../clt/aux_chn14.clt",
-                                    "../../clt/aux_chn15.clt"};
+                                    CLT_BASE_PATH "aux_chn0.clt",
+                                    CLT_BASE_PATH "aux_chn1.clt",
+                                    CLT_BASE_PATH "aux_chn2.clt",
+                                    CLT_BASE_PATH "aux_chn3.clt",
+                                    CLT_BASE_PATH "aux_chn4.clt",
+                                    CLT_BASE_PATH "aux_chn5.clt",
+                                    CLT_BASE_PATH "aux_chn6.clt",
+                                    CLT_BASE_PATH "aux_chn7.clt",
+                                    CLT_BASE_PATH "aux_chn8.clt",
+                                    CLT_BASE_PATH "aux_chn9.clt",
+                                    CLT_BASE_PATH "aux_chn10.clt",
+                                    CLT_BASE_PATH "aux_chn11.clt",
+                                    CLT_BASE_PATH "aux_chn12.clt",
+                                    CLT_BASE_PATH "aux_chn13.clt",
+                                    CLT_BASE_PATH "aux_chn14.clt",
+                                    CLT_BASE_PATH "aux_chn15.clt"};
 
 #endif
     const char *result_rbg_file[] = {
-        "../../clt/aux_chn0.rbg",
-        "../../clt/aux_chn1.rbg",
-        "../../clt/aux_chn2.rbg",
-        "../../clt/aux_chn3.rbg",
-        "../../clt/aux_chn4.rbg",
-        "../../clt/aux_chn5.rbg",
-        "../../clt/aux_chn6.rbg",
-        "../../clt/aux_chn7.rbg",
-        "../../clt/aux_chn8.rbg",
-        "../../clt/aux_chn9.rbg",
-        "../../clt/aux_chn10.rbg",
-        "../../clt/aux_chn11.rbg",
-        "../../clt/aux_chn12.rbg",
-        "../../clt/aux_chn13.rbg",
-        "../../clt/aux_chn14.rbg",
-        "../../clt/aux_chn15.rbg"};
+        CLT_BASE_PATH "aux_chn0.rbg",
+        CLT_BASE_PATH "aux_chn1.rbg",
+        CLT_BASE_PATH "aux_chn2.rbg",
+        CLT_BASE_PATH "aux_chn3.rbg",
+        CLT_BASE_PATH "aux_chn4.rbg",
+        CLT_BASE_PATH "aux_chn5.rbg",
+        CLT_BASE_PATH "aux_chn6.rbg",
+        CLT_BASE_PATH "aux_chn7.rbg",
+        CLT_BASE_PATH "aux_chn8.rbg",
+        CLT_BASE_PATH "aux_chn9.rbg",
+        CLT_BASE_PATH "aux_chn10.rbg",
+        CLT_BASE_PATH "aux_chn11.rbg",
+        CLT_BASE_PATH "aux_chn12.rbg",
+        CLT_BASE_PATH "aux_chn13.rbg",
+        CLT_BASE_PATH "aux_chn14.rbg",
+        CLT_BASE_PATH "aux_chn15.rbg"};
     //#endif
-    const char *result_corr_file = "../../clt/aux_corr.corr";
-    const char *result_corr_quad_file = "../../clt/aux_corr-quad.corr";
-    const char *result_corr_td_norm_file = "../../clt/aux_corr-td-norm.corr";
-    ///    const char* result_corr_cross_file = "../../clt/aux_corr-cross.corr";
-    const char *result_textures_file = "../../clt/aux_texture_nodp.rgba";
-    const char *result_diff_rgb_combo_file = "../../clt/aux_diff_rgb_combo_nodp.drbg";
-    const char *result_textures_rgba_file = "../../clt/aux_texture_rgba_nodp.rgba";
+    const char *result_corr_file = CLT_BASE_PATH "aux_corr.corr";
+    const char *result_corr_quad_file = CLT_BASE_PATH "aux_corr-quad.corr";
+    const char *result_corr_td_norm_file = CLT_BASE_PATH "aux_corr-td-norm.corr";
+    ///    const char* result_corr_cross_file = CLT_BASE_PATH "aux_corr-cross.corr";
+    const char *result_textures_file = CLT_BASE_PATH "aux_texture_nodp.rgba";
+    const char *result_diff_rgb_combo_file = CLT_BASE_PATH "aux_diff_rgb_combo_nodp.drbg";
+    const char *result_textures_rgba_file = CLT_BASE_PATH "aux_texture_rgba_nodp.rgba";
 
-    const char *result_textures_file_dp = "../../clt/aux_texture_dp.rgba";
-    const char *result_diff_rgb_combo_file_dp = "../../clt/aux_diff_rgb_combo_dp.drbg";
-    const char *result_textures_rgba_file_dp = "../../clt/aux_texture_rgba_dp.rgba";
+    const char *result_textures_file_dp = CLT_BASE_PATH "aux_texture_dp.rgba";
+    const char *result_diff_rgb_combo_file_dp = CLT_BASE_PATH "aux_diff_rgb_combo_dp.drbg";
+    const char *result_textures_rgba_file_dp = CLT_BASE_PATH "aux_texture_rgba_dp.rgba";
 
-    const char *rByRDist_file = "../../clt/aux.rbyrdist";
-    const char *correction_vector_file = "../../clt/aux.correction_vector";
-    const char *geometry_correction_file = "../../clt/aux.geometry_correction";
+    const char *rByRDist_file = CLT_BASE_PATH "aux.rbyrdist";
+    const char *correction_vector_file = CLT_BASE_PATH "aux.correction_vector";
+    const char *geometry_correction_file = CLT_BASE_PATH "aux.geometry_correction";
 
     float color_weights[] = {
         1.0,   // float             weight0,            // scale for R 0.5 / (1.0 + 0.5 +0.2)
@@ -683,56 +687,56 @@ int main(int argc, char **argv) {
 
 #else
     const char *kernel_file[] = {
-        "../../clt/main_chn0_transposed.kernel",
-        "../../clt/main_chn1_transposed.kernel",
-        "../../clt/main_chn2_transposed.kernel",
-        "../../clt/main_chn3_transposed.kernel"};
+        CLT_BASE_PATH "main_chn0_transposed.kernel",
+        CLT_BASE_PATH "main_chn1_transposed.kernel",
+        CLT_BASE_PATH "main_chn2_transposed.kernel",
+        CLT_BASE_PATH "main_chn3_transposed.kernel"};
 
     const char *kernel_offs_file[] = {
-        "../../clt/main_chn0_transposed.kernel_offsets",
-        "../../clt/main_chn1_transposed.kernel_offsets",
-        "../../clt/main_chn2_transposed.kernel_offsets",
-        "../../clt/main_chn3_transposed.kernel_offsets"};
+        CLT_BASE_PATH "main_chn0_transposed.kernel_offsets",
+        CLT_BASE_PATH "main_chn1_transposed.kernel_offsets",
+        CLT_BASE_PATH "main_chn2_transposed.kernel_offsets",
+        CLT_BASE_PATH "main_chn3_transposed.kernel_offsets"};
 
     const char *image_files[] = {
-        "../../clt/main_chn0.bayer",
-        "../../clt/main_chn1.bayer",
-        "../../clt/main_chn2.bayer",
-        "../../clt/main_chn3.bayer"};
+        CLT_BASE_PATH "main_chn0.bayer",
+        CLT_BASE_PATH "main_chn1.bayer",
+        CLT_BASE_PATH "main_chn2.bayer",
+        CLT_BASE_PATH "main_chn3.bayer"};
 
     const char *ports_offs_xy_file[] = {
-        "../../clt/main_chn0.portsxy",
-        "../../clt/main_chn1.portsxy",
-        "../../clt/main_chn2.portsxy",
-        "../../clt/main_chn3.portsxy"};
+        CLT_BASE_PATH "main_chn0.portsxy",
+        CLT_BASE_PATH "main_chn1.portsxy",
+        CLT_BASE_PATH "main_chn2.portsxy",
+        CLT_BASE_PATH "main_chn3.portsxy"};
 #ifdef SAVE_CLT
     const char *ports_clt_file[] = {// never referenced
-                                    "../../clt/main_chn0.clt",
-                                    "../../clt/main_chn1.clt",
-                                    "../../clt/main_chn2.clt",
-                                    "../../clt/main_chn3.clt"};
+                                    CLT_BASE_PATH "main_chn0.clt",
+                                    CLT_BASE_PATH "main_chn1.clt",
+                                    CLT_BASE_PATH "main_chn2.clt",
+                                    CLT_BASE_PATH "main_chn3.clt"};
 #endif
     const char *result_rbg_file[] = {
-        "../../clt/main_chn0.rbg",
-        "../../clt/main_chn1.rbg",
-        "../../clt/main_chn2.rbg",
-        "../../clt/main_chn3.rbg"};
+        CLT_BASE_PATH "main_chn0.rbg",
+        CLT_BASE_PATH "main_chn1.rbg",
+        CLT_BASE_PATH "main_chn2.rbg",
+        CLT_BASE_PATH "main_chn3.rbg"};
     //#endif
-    const char *result_corr_file = "../../clt/main_corr.corr";
-    const char *result_corr_quad_file = "../../clt/main_corr-quad.corr";
-    const char *result_corr_td_norm_file = "../../clt/aux_corr-td-norm.corr";
-    ///    const char* result_corr_cross_file = "../../clt/main_corr-cross.corr";
-    const char *result_textures_file = "../../clt/main_texture_nodp.rgba";
-    const char *result_diff_rgb_combo_file = "../../clt/main_diff_rgb_combo_nodp.drbg";
-    const char *result_textures_rgba_file = "../../clt/main_texture_rgba_nodp.rgba";
+    const char *result_corr_file = CLT_BASE_PATH "main_corr.corr";
+    const char *result_corr_quad_file = CLT_BASE_PATH "main_corr-quad.corr";
+    const char *result_corr_td_norm_file = CLT_BASE_PATH "aux_corr-td-norm.corr";
+    ///    const char* result_corr_cross_file = CLT_BASE_PATH "main_corr-cross.corr";
+    const char *result_textures_file = CLT_BASE_PATH "main_texture_nodp.rgba";
+    const char *result_diff_rgb_combo_file = CLT_BASE_PATH "main_diff_rgb_combo_nodp.drbg";
+    const char *result_textures_rgba_file = CLT_BASE_PATH "main_texture_rgba_nodp.rgba";
 
-    const char *result_textures_file_dp = "../../clt/main_texture_dp.rgba";
-    const char *result_diff_rgb_combo_file_dp = "../../clt/main_diff_rgb_combo_dp.drbg";
-    const char *result_textures_rgba_file_dp = "../../clt/main_texture_rgba_dp.rgba";
+    const char *result_textures_file_dp = CLT_BASE_PATH "main_texture_dp.rgba";
+    const char *result_diff_rgb_combo_file_dp = CLT_BASE_PATH "main_diff_rgb_combo_dp.drbg";
+    const char *result_textures_rgba_file_dp = CLT_BASE_PATH "main_texture_rgba_dp.rgba";
 
-    const char *rByRDist_file = "../../clt/main.rbyrdist";
-    const char *correction_vector_file = "../../clt/main.correction_vector";
-    const char *geometry_correction_file = "../../clt/main.geometry_correction";
+    const char *rByRDist_file = CLT_BASE_PATH "main.rbyrdist";
+    const char *correction_vector_file = CLT_BASE_PATH "main.correction_vector";
+    const char *geometry_correction_file = CLT_BASE_PATH "main.geometry_correction";
 
     float color_weights[] = {
         0.294118,   // float             weight0,            // scale for R 0.5 / (1.0 + 0.5 +0.2)
@@ -1594,6 +1598,8 @@ int main(int argc, char **argv) {
 #else
         checkCudaErrors(cudaDeviceSynchronize());
 
+        // accumulate_coreleations fo here-ish
+
         corr2D_normalize<<<1, 1>>>(
             num_corrs,                        // tp_task_size,           // int               num_corr_tiles,     // number of correlation tiles to process
             dstride_corr_td / sizeof(float),  // const size_t      corr_stride_td,     // in floats
@@ -1627,8 +1633,8 @@ int main(int argc, char **argv) {
         (corr_size_combo * corr_size_combo) * sizeof(float),
         num_corr_combo,
         cudaMemcpyDeviceToHost));
-    //    const char* result_corr_quad_file =  "../../clt/main_corr-quad.corr";
-    //    const char* result_corr_cross_file = "../../clt/main_corr-cross.corr";
+    //    const char* result_corr_quad_file =  CLT_BASE_PATH "main_corr-quad.corr";
+    //    const char* result_corr_cross_file = CLT_BASE_PATH "main_corr-cross.corr";
 
 #ifndef NSAVE_CORR
     printf("Writing phase correlation data to %s\n", result_corr_quad_file);
