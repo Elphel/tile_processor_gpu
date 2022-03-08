@@ -620,23 +620,24 @@ int main(int argc, char **argv) {
 
 //#ifndef DBG_TILE
 #ifdef SAVE_CLT
-    const char *ports_clt_file[] = {// never referenced
-                                    CLT_BASE_PATH "aux_chn0.clt",
-                                    CLT_BASE_PATH "aux_chn1.clt",
-                                    CLT_BASE_PATH "aux_chn2.clt",
-                                    CLT_BASE_PATH "aux_chn3.clt",
-                                    CLT_BASE_PATH "aux_chn4.clt",
-                                    CLT_BASE_PATH "aux_chn5.clt",
-                                    CLT_BASE_PATH "aux_chn6.clt",
-                                    CLT_BASE_PATH "aux_chn7.clt",
-                                    CLT_BASE_PATH "aux_chn8.clt",
-                                    CLT_BASE_PATH "aux_chn9.clt",
-                                    CLT_BASE_PATH "aux_chn10.clt",
-                                    CLT_BASE_PATH "aux_chn11.clt",
-                                    CLT_BASE_PATH "aux_chn12.clt",
-                                    CLT_BASE_PATH "aux_chn13.clt",
-                                    CLT_BASE_PATH "aux_chn14.clt",
-                                    CLT_BASE_PATH "aux_chn15.clt"};
+    // never referenced
+    const char *ports_clt_file[] = {
+        CLT_BASE_PATH "aux_chn0.clt",
+        CLT_BASE_PATH "aux_chn1.clt",
+        CLT_BASE_PATH "aux_chn2.clt",
+        CLT_BASE_PATH "aux_chn3.clt",
+        CLT_BASE_PATH "aux_chn4.clt",
+        CLT_BASE_PATH "aux_chn5.clt",
+        CLT_BASE_PATH "aux_chn6.clt",
+        CLT_BASE_PATH "aux_chn7.clt",
+        CLT_BASE_PATH "aux_chn8.clt",
+        CLT_BASE_PATH "aux_chn9.clt",
+        CLT_BASE_PATH "aux_chn10.clt",
+        CLT_BASE_PATH "aux_chn11.clt",
+        CLT_BASE_PATH "aux_chn12.clt",
+        CLT_BASE_PATH "aux_chn13.clt",
+        CLT_BASE_PATH "aux_chn14.clt",
+        CLT_BASE_PATH "aux_chn15.clt"};
 
 #endif
     const char *result_rbg_file[] = {
@@ -777,11 +778,12 @@ int main(int argc, char **argv) {
     int task_size = get_task_size(num_cams);  // sizeof(struct tp_task)/sizeof(float) - 6 * (NUM_CAMS - num_cams);
 
     // FIXME: update to use new correlations and num_cams
-    float port_offsets4[4][2] = {// used only in textures to scale differences
-                                 {-0.5, -0.5},
-                                 {0.5, -0.5},
-                                 {-0.5, 0.5},
-                                 {0.5, 0.5}};
+    float port_offsets4[4][2] = {
+        // used only in textures to scale differences
+        {-0.5, -0.5},
+        {0.5, -0.5},
+        {-0.5, 0.5},
+        {0.5, 0.5}};
 
     float port_offsets[NUM_CAMS][2];
     if (num_cams == 4) {
@@ -1598,7 +1600,7 @@ int main(int argc, char **argv) {
 #else
         checkCudaErrors(cudaDeviceSynchronize());
 
-        // accumulate_coreleations fo here-ish
+        // accumulate_coreleations here-ish
 
         corr2D_normalize<<<1, 1>>>(
             num_corrs,                        // tp_task_size,           // int               num_corr_tiles,     // number of correlation tiles to process
