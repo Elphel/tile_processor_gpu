@@ -46,7 +46,7 @@
 //#define NUM_PAIRS                      6
 //#define NUM_COLORS                     1 //3
 // kernels [num_cams][num_colors][KERNELS_HOR][KERNELS_VERT][4][64]
-#define KERNELS_LSTEP                  4
+///#define KERNELS_LSTEP                  4
 #define THREADS_PER_TILE               8
 #define TILES_PER_BLOCK                4
 #define CORR_THREADS_PER_TILE          8
