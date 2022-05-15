@@ -36,7 +36,7 @@
 // #define NOTEXTURE_RGBA
 #define SAVE_CLT
 //#define NO_DP
-
+#define CORR_INTER_SELF 1
 
 
 #include <stdio.h>
@@ -685,6 +685,7 @@ int main(int argc, char **argv)
     const char* result_corr_quad_file =     "clt/aux_corr-quad.corr";
     const char* result_corr_td_norm_file =  "clt/aux_corr-td-norm.corr";
 ///    const char* result_corr_cross_file = "clt/aux_corr-cross.corr";
+    const char* result_inter_td_norm_file = "clt/aux_inter-td-norm.corr";
     const char* result_textures_file =      "clt/aux_texture_nodp.rgba";
     const char* result_diff_rgb_combo_file ="clt/aux_diff_rgb_combo_nodp.drbg";
     const char* result_textures_rgba_file = "clt/aux_texture_rgba_nodp.rgba";
@@ -752,6 +753,7 @@ int main(int argc, char **argv)
     const char* result_corr_quad_file =  "clt/main_corr-quad.corr";
     const char* result_corr_td_norm_file =  "clt/aux_corr-td-norm.corr";
 ///    const char* result_corr_cross_file = "clt/main_corr-cross.corr";
+    const char* result_inter_td_norm_file =  "clt/aux_inter-td-norm.corr";
     const char* result_textures_file =       "clt/main_texture_nodp.rgba";
     const char* result_diff_rgb_combo_file ="clt/main_diff_rgb_combo_nodp.drbg";
     const char* result_textures_rgba_file = "clt/main_texture_rgba_nodp.rgba";
@@ -1788,6 +1790,142 @@ int main(int argc, char **argv)
 
 #endif // // QUAD_COMBINE#else
 #endif // ifndef NOCORR_TD
+
+
+// Testing "interframe" correlation with itself, assuming direct convert already ran
+
+
+
+
+#ifdef CORR_INTER_SELF
+    int sel_sensors = 0xffff;
+    int num_sel_senosrs = 16;
+    num_pairs = num_sel_senosrs+1;
+    num_corr_indices = num_pairs * num_tiles;
+    StopWatchInterface *timerINTERSELF = 0;
+    sdkCreateTimer(&timerINTERSELF);
+//    int num_corr_combo_inter;
+    for (int i = i0; i < numIterations; i++)
+    {
+    	if (i == 0)
+    	{
+    		checkCudaErrors(cudaDeviceSynchronize());
+    		sdkResetTimer(&timerINTERSELF);
+    		sdkStartTimer(&timerINTERSELF);
+    	}
+    	correlate2D_inter<<<1,1>>>( // only results in TD
+    			num_cams,                      // int               num_cams,
+				sel_sensors,                   // int               sel_sensors,
+				gpu_clt,                       // float          ** gpu_clt,            // [num_cams] ->[TILES-Y][TILES-X][colors][DTT_SIZE*DTT_SIZE]
+				gpu_clt,                       // float          ** gpu_clt_ref,        // [num_cams] ->[TILES-Y][TILES-X][colors][DTT_SIZE*DTT_SIZE]
+				num_colors,                    // int               colors,             // number of colors (3/1)
+				color_weights[0], // 0.25,     // float             scale0,             // scale for R
+				color_weights[1], // 0.25,     // float             scale1,             // scale for B
+				color_weights[2], // 0.5,      // float             scale2,             // scale for G
+				gpu_ftasks,                    // float            * gpu_ftasks,        // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
+				tp_task_size,                  // int               num_tiles) // number of tiles in task
+				TILESX,                        // int               tilesx,             // number of tile rows
+				gpu_corr_indices,              // int             * gpu_corr_indices,   // packed tile+pair
+				gpu_num_corr_tiles,            // int             * pnum_corr_tiles,    // pointer to a number of correlation tiles to process
+				dstride_corr_td/sizeof(float), // const size_t      corr_stride,        // in floats
+				gpu_corrs_td);                 // float           * gpu_corrs);         // correlation output data
+        getLastCudaError("Kernel failure:correlate2D_inter");
+    	checkCudaErrors(cudaDeviceSynchronize());
+    	printf("correlate2D_inter-TD pass: %d\n",i);
+    	checkCudaErrors(cudaMemcpy(
+    			&num_corrs,
+    			gpu_num_corr_tiles,
+    			sizeof(int),
+    			cudaMemcpyDeviceToHost));
+    	checkCudaErrors(cudaDeviceSynchronize());
+
+    	corr2D_normalize<<<1,1>>>(
+    			num_corrs, //tp_task_size,           // int               num_corr_tiles,     // number of correlation tiles to process
+				dstride_corr_td/sizeof(float),       // const size_t      corr_stride_td,     // in floats
+				gpu_corrs_td,                        // float           * gpu_corrs_td,       // correlation tiles in transform domain
+				(float *) 0, // corr_weights,        // float           * corr_weights,       // null or per-tile weight (fat_zero2 will be divided by it)
+				dstride_corr/sizeof(float),          // const size_t      corr_stride,        // in floats
+				gpu_corrs,                           // float           * gpu_corrs,          // correlation output data (pixel domain)
+				30.0 * 30.0,                         // float             fat_zero2,           // here - absolute
+				CORR_OUT_RAD);                       // int               corr_radius);        // radius of the output correlation (7 for 15x15)
+    	getLastCudaError("Kernel failure:corr2D_normalize");
+    	checkCudaErrors(cudaDeviceSynchronize());
+    	printf("corr2D_normalize pass: %d\n",i);
+    }
+    sdkStopTimer(&timerINTERSELF);
+    float avgTimeINTERSELF = (float)sdkGetTimerValue(&timerINTERSELF) / (float)numIterations;
+    sdkDeleteTimer(&timerINTERSELF);
+    printf("Average CORR-TD and companions run time =%f ms, num cor tiles (old) = %d\n",  avgTimeINTERSELF, num_corrs);
+
+
+	rslt_corr_size =   num_corrs * corr_size * corr_size;
+	corr_img_size = num_corr_indices * 16*16; // NAN
+	corr_img = (float *)malloc(corr_img_size * sizeof(float));
+	cpu_corr = (float *)malloc(rslt_corr_size * sizeof(float));
+	cpu_corr_indices = (int *) malloc(num_corr_indices * sizeof(int));
+
+    checkCudaErrors(cudaMemcpy2D(
+    		cpu_corr,
+			(corr_size * corr_size) * sizeof(float),
+			gpu_corrs,
+			dstride_corr,
+			(corr_size * corr_size) * sizeof(float),
+			num_corrs,
+			cudaMemcpyDeviceToHost));
+
+    checkCudaErrors(cudaMemcpy(
+    		cpu_corr_indices,
+			gpu_corr_indices,
+			num_corr_indices * sizeof(int),
+			cudaMemcpyDeviceToHost));
+
+    for (int i = 0; i < corr_img_size; i++){
+    	corr_img[i] = NAN;
+    }
+//  int num_pairs = 120;
+//  int sel_sensors = 0xffff;
+//  int num_sel_senosrs = 16;
+//	int corr_size =        2 * CORR_OUT_RAD + 1; // 15
+//	int num_tiles = tp_task_size; // TILESX * TILESYA; //Was this on 01/22/2022
+//	int num_corr_indices = num_pairs * num_tiles;
+
+    for (int ict = 0; ict < num_corr_indices; ict++){
+    	int ctt = ( cpu_corr_indices[ict] >>  CORR_NTILE_SHIFT);
+    	int cpair = cpu_corr_indices[ict] & ((1 << CORR_NTILE_SHIFT) - 1);
+    	if (cpair == 0xff){
+    		cpair = num_sel_senosrs;
+    	}
+    	int ty = ctt / TILESX;
+    	int tx = ctt % TILESX;
+    	int src_offs0 = ict * corr_size * corr_size;
+    	int dst_offs0 = cpair * (num_tiles * 16 * 16) +  (ty * 16 * TILESX * 16) + (tx * 16);
+    	for (int iy = 0; iy < corr_size; iy++){
+    		int src_offs = src_offs0 + iy * corr_size; // ict * num_pairs * corr_size * corr_size;
+    		int dst_offs = dst_offs0 + iy * (TILESX * 16);
+    		for (int ix = 0; ix < corr_size; ix++){
+    			corr_img[dst_offs++] = cpu_corr[src_offs++];
+    		}
+    	}
+    }
+
+#ifndef NSAVE_CORR
+    printf("Writing interscene phase correlation data to %s, width = %d, height=%d, slices=%d, length=%ld bytes\n",
+    		result_inter_td_norm_file, (TILESX*16),(TILESYA*16), num_pairs, (corr_img_size * sizeof(float)) ) ;
+    writeFloatsToFile(
+    		corr_img,                  // float *       data, // allocated array
+			corr_img_size,             // int           size, // length in elements
+			result_inter_td_norm_file); // 			   const char *  path) // file path
+#endif
+    free (cpu_corr);
+    free (cpu_corr_indices);
+    free (corr_img);
+#endif    // #ifdef CORR_INTER_SELF
+
+
+
+
+
+
 
 
 
