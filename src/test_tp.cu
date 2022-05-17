@@ -1116,6 +1116,7 @@ int main(int argc, char **argv)
 
 	float * corr_img; //  = (float *)malloc(corr_img_size * sizeof(float));
 	float * cpu_corr; //  = (float *)malloc(rslt_corr_size * sizeof(float));
+	float * cpu_corr_td;
 	int * cpu_corr_indices; //  = (int *) malloc(num_corr_indices * sizeof(int));
 
 
@@ -1799,8 +1800,8 @@ int main(int argc, char **argv)
 
 #ifdef CORR_INTER_SELF
     int sel_sensors = 0xffff; // 0x7fff; // 0xffff;
-    int num_sel_senosrs = 16; // 15; // 16;
-    num_pairs = num_sel_senosrs+1;
+    int num_sel_sensors = 16; // 15; // 16;
+    num_pairs = num_sel_sensors+1;
     num_corr_indices = num_pairs * num_tiles;
     StopWatchInterface *timerINTERSELF = 0;
     sdkCreateTimer(&timerINTERSELF);
@@ -1838,7 +1839,6 @@ int main(int argc, char **argv)
     			sizeof(int),
     			cudaMemcpyDeviceToHost));
     	checkCudaErrors(cudaDeviceSynchronize());
-
     	corr2D_normalize<<<1,1>>>(
     			num_corrs, //tp_task_size,           // int               num_corr_tiles,     // number of correlation tiles to process
 				dstride_corr_td/sizeof(float),       // const size_t      corr_stride_td,     // in floats
@@ -1884,7 +1884,7 @@ int main(int argc, char **argv)
     }
 //  int num_pairs = 120;
 //  int sel_sensors = 0xffff;
-//  int num_sel_senosrs = 16;
+//  int num_sel_sensors = 16;
 //	int corr_size =        2 * CORR_OUT_RAD + 1; // 15
 //	int num_tiles = tp_task_size; // TILESX * TILESYA; //Was this on 01/22/2022
 //	int num_corr_indices = num_pairs * num_tiles;
@@ -1893,7 +1893,7 @@ int main(int argc, char **argv)
     	int ctt = ( cpu_corr_indices[ict] >>  CORR_NTILE_SHIFT);
     	int cpair = cpu_corr_indices[ict] & ((1 << CORR_NTILE_SHIFT) - 1);
     	if (cpair == 0xff){
-    		cpair = num_sel_senosrs;
+    		cpair = num_sel_sensors;
     	}
     	int ty = ctt / TILESX;
     	int tx = ctt % TILESX;
@@ -1907,7 +1907,6 @@ int main(int argc, char **argv)
     		}
     	}
     }
-
 #ifndef NSAVE_CORR
     printf("Writing interscene phase correlation data to %s, width = %d, height=%d, slices=%d, length=%ld bytes\n",
     		result_inter_td_norm_file, (TILESX*16),(TILESYA*16), num_pairs, (corr_img_size * sizeof(float)) ) ;
@@ -1916,6 +1915,77 @@ int main(int argc, char **argv)
 			corr_img_size,             // int           size, // length in elements
 			result_inter_td_norm_file); // 			   const char *  path) // file path
 #endif
+
+
+#if 1
+	int rslt_corr_size_td =   num_corrs * DTT_SIZE2*DTT_SIZE2;
+	cpu_corr_td = (float *)malloc(rslt_corr_size_td * sizeof(float));
+    checkCudaErrors(cudaMemcpy2D(
+    		cpu_corr_td,
+			(DTT_SIZE2*DTT_SIZE2) * sizeof(float),
+			gpu_corrs_td,
+			dstride_corr_td,
+			(DTT_SIZE2*DTT_SIZE2) * sizeof(float),
+			num_corrs,
+			cudaMemcpyDeviceToHost));
+// Reuse the same corr_img for TD images - each tile is still 16x16 (corr was 15x15 and gap)
+    for (int ict = 0; ict < num_corr_indices; ict++){
+    	int ctt = ( cpu_corr_indices[ict] >>  CORR_NTILE_SHIFT);
+    	int cpair = cpu_corr_indices[ict] & ((1 << CORR_NTILE_SHIFT) - 1);
+    	if (cpair == 0xff){
+    		cpair = num_sel_sensors;
+    	}
+    	int ty = ctt / TILESX;
+    	int tx = ctt % TILESX;
+    	int src_offs0 = ict * DTT_SIZE2*DTT_SIZE2;
+    	int dst_offs0 = cpair * (num_tiles * 16 * 16) +  (ty * 16 * TILESX * 16) + (tx * 16);
+    	for (int iquad = 0; iquad < 4; iquad ++) {
+    		int iqy = (iquad >> 1) & 1;
+    		int iqx = (iquad >> 0) & 1;
+    		for (int iy = 0; iy < DTT_SIZE; iy++){
+    			int src_offs = src_offs0 + iy * DTT_SIZE + iquad * DTT_SIZE * DTT_SIZE;
+    			int dst_offs = dst_offs0 + (iy + DTT_SIZE * iqy)* (TILESX * 16) + iqx * DTT_SIZE;
+    			for (int ix = 0; ix < DTT_SIZE; ix++){
+    				corr_img[dst_offs++] = cpu_corr_td[src_offs++];
+    			}
+    		}
+    	}
+    }
+
+#ifndef NSAVE_CORR
+    printf("Writing interscene phase correlation TD data");
+    writeFloatsToFile(
+    		corr_img,                  // float *       data, // allocated array
+			corr_img_size,             // int           size, // length in elements
+			"clt/aux_interscene-TD.raw"); // 			   const char *  path) // file path
+#endif
+
+
+    int corr_index_img_length = TILESX*TILESY*(num_sel_sensors+1) ;
+    float *corr_index_img =  (float *)malloc(corr_index_img_length * sizeof(float));
+    for (int i = 0; i < corr_index_img_length; i++){
+    	corr_index_img[i] = NAN;
+    }
+    for (int ict = 0; ict < num_corr_indices; ict++){
+    	int ctt = ( cpu_corr_indices[ict] >>  CORR_NTILE_SHIFT);
+    	int cpair = cpu_corr_indices[ict] & ((1 << CORR_NTILE_SHIFT) - 1);
+    	if (cpair == 0xff){
+    		cpair = num_sel_sensors;
+    	}
+    	int ty = ctt / TILESX;
+    	int tx = ctt % TILESX;
+    	corr_index_img[cpair*TILESX*TILESY + TILESX*ty + tx] =  ict; // cpu_corr_indices[ict];
+    }
+
+    printf("Writing interscene indices\n");
+    writeFloatsToFile(
+    		corr_index_img,                  // float *       data, // allocated array
+			corr_index_img_length,           // int           size, // length in elements
+			"clt/aux_inter-indices.raw"); // 			   const char *  path) // file path
+    free (corr_index_img);
+    free (cpu_corr_td);
+#endif
+
     free (cpu_corr);
     free (cpu_corr_indices);
     free (corr_img);

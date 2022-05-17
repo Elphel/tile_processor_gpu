@@ -1303,30 +1303,31 @@ extern "C" __global__ void correlate2D_inter( // only results in TD
 					gpu_corr_indices,    // int *              gpu_corr_indices,  // array of correlation tasks
 					pnum_corr_tiles);    // int *              pnum_corr_tiles);   // pointer to the length of correlation tasks array
 			cudaDeviceSynchronize();
-			int num_corr_tiles = (*pnum_corr_tiles) * num_sel_sensors/ (num_sel_sensors + 1); // remove sum from count
+			int num_corr_tiles_with_sum = (*pnum_corr_tiles);
+			int num_corr_tiles_wo_sum =   num_corr_tiles_with_sum * num_sel_sensors/ (num_sel_sensors + 1); // remove sum from count
 			dim3 threads_corr(CORR_THREADS_PER_TILE, CORR_TILES_PER_BLOCK, 1);
-			dim3 grid_corr((num_corr_tiles + CORR_TILES_PER_BLOCK-1) / CORR_TILES_PER_BLOCK,1,1);
+			dim3 grid_corr((num_corr_tiles_wo_sum + CORR_TILES_PER_BLOCK-1) / CORR_TILES_PER_BLOCK,1,1);
 
 			correlate2D_inter_inner<<<grid_corr,threads_corr>>>( // will only process to TD, no normalisations and back conversion
-					num_cams,           // int               num_cams,
-					num_sel_sensors,    // int               num_sel_sensors,    // number of sensors to correlate (not counting sum of all)
-					gpu_clt,            // float          ** gpu_clt,            // [num_cams] ->[TILES-Y][TILES-X][colors][DTT_SIZE*DTT_SIZE]
-					gpu_clt_ref,        // float          ** gpu_clt_ref,        // [num_cams] ->[TILES-Y][TILES-X][colors][DTT_SIZE*DTT_SIZE]
-					colors,             // int               colors,             // number of colors (3/1)
-					scale0,             // float             scale0,             // scale for R
-					scale1,             // float             scale1,             // scale for B
-					scale2,             // float             scale2,             // scale for G
-					num_corr_tiles,     // int               num_corr_tiles,     // number of correlation tiles to process (here it includes sum for compatibility with intra format)
-					gpu_corr_indices,   // int             * gpu_corr_indices,   // packed tile + sensor (0xff - sum)
-					corr_stride,        // size_t            corr_stride,        // in floats
-					gpu_corrs);         // float           * gpu_corrs)          // correlation output data (either pixel domain or transform domain
+					num_cams,                // int          num_cams,
+					num_sel_sensors,         // int          num_sel_sensors,    // number of sensors to correlate (not counting sum of all)
+					gpu_clt,                 // float     ** gpu_clt,            // [num_cams] ->[TILES-Y][TILES-X][colors][DTT_SIZE*DTT_SIZE]
+					gpu_clt_ref,             // float     ** gpu_clt_ref,        // [num_cams] ->[TILES-Y][TILES-X][colors][DTT_SIZE*DTT_SIZE]
+					colors,                  // int          colors,             // number of colors (3/1)
+					scale0,                  // float        scale0,             // scale for R
+					scale1,                  // float        scale1,             // scale for B
+					scale2,                  // float        scale2,             // scale for G
+					num_corr_tiles_with_sum, // int          num_corr_tiles,     // number of correlation tiles to process (here it includes sum for compatibility with intra format)
+					gpu_corr_indices,        // int        * gpu_corr_indices,   // packed tile + sensor (0xff - sum)
+					corr_stride,             // size_t       corr_stride,        // in floats
+					gpu_corrs);              // float      * gpu_corrs)          // correlation output data (either pixel domain or transform domain
 			dim3 grid_combine((num_tiles + CORR_TILES_PER_BLOCK-1) / CORR_TILES_PER_BLOCK,1,1);
 			combine_inter<<<grid_combine,threads_corr>>>(     // combine per-senor interscene correlations
-					num_sel_sensors,    // int               num_sel_sensors,    // number of sensors to correlate (not counting sum of all)
-					num_corr_tiles,     // int               num_corr_tiles,     // number of correlation tiles to process (here it includes sum)
-					gpu_corr_indices,   // int             * gpu_corr_indices,   // packed tile+pair
-					corr_stride,        // size_t            corr_stride,        // in floats
-					gpu_corrs);         // float           * gpu_corrs);          // correlation output data (either pixel domain or transform domain
+					num_sel_sensors,         // int          num_sel_sensors,    // number of sensors to correlate (not counting sum of all)
+					num_corr_tiles_with_sum, // int          num_corr_tiles,     // number of correlation tiles to process (here it includes sum)
+					gpu_corr_indices,        // int        * gpu_corr_indices,   // packed tile+pair NOT USED
+					corr_stride,             // size_t       corr_stride,        // in floats
+					gpu_corrs);              // float      * gpu_corrs);          // correlation output data (either pixel domain or transform domain
 		}
 	}
 }
@@ -1519,6 +1520,7 @@ extern "C" __global__ void correlate2D_inter_inner( // will only process to TD, 
         	__syncthreads();// __syncwarp();
         } // if (color == 1){ // LPF only after B (nothing in mono)
     } // for (int color = 0; color < colors; color++){
+	__syncthreads();// __syncwarp();
     float *mem_corr = gpu_corrs + corr_stride * corr_offset + threadIdx.x;
     float *clt = clt_corr + threadIdx.x;
 #pragma unroll
@@ -2901,11 +2903,11 @@ __global__ void index_correlate(
 __global__ void index_inter_correlate(
 		int               num_cams,
 		int               sel_sensors,
-		float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
-		int                num_tiles,         // number of tiles in task
-		int                width,                // number of tiles in a row
-		int *              gpu_corr_indices,  // array of correlation tasks
-		int *              pnum_corr_tiles)   // pointer to the length of correlation tasks array
+		float           * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
+		int               num_tiles,         // number of tiles in task
+		int               width,                // number of tiles in a row
+		int *             gpu_corr_indices,  // array of correlation tasks
+		int *             pnum_corr_tiles)   // pointer to the length of correlation tasks array
 {
 	int num_tile = blockIdx.x * blockDim.x + threadIdx.x;
 	if (num_tile >= num_tiles){
