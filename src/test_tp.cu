@@ -1798,8 +1798,8 @@ int main(int argc, char **argv)
 
 
 #ifdef CORR_INTER_SELF
-    int sel_sensors = 0xffff;
-    int num_sel_senosrs = 16;
+    int sel_sensors = 0xffff; // 0x7fff; // 0xffff;
+    int num_sel_senosrs = 16; // 15; // 16;
     num_pairs = num_sel_senosrs+1;
     num_corr_indices = num_pairs * num_tiles;
     StopWatchInterface *timerINTERSELF = 0;
