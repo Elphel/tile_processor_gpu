@@ -138,14 +138,97 @@ float ** copyalloc_pointers_gpu(float ** gpu_pointer,
     return gpu_pointer_to_gpu_pointers;
 }
 
+// shift image in-place, repeat lines/columns
+void shift_image (
+		float * image,
+        int width,
+		int height,
+		int bayer,
+		int dx,
+		int dy)
+{
+	int step = 1;
+	if (bayer){
+		step = 2;
+		dx &= -2;
+		dy &= -2;
+	}
+	// vertical shift dy>0 - down, dy < 0 - up
+	for (int m = 0; m < dy; m+= step) { // only if dy > 0 (down)
+		for (int y = height - 1; y >= step; y++){
+			float * dp = image + (y * width);
+			float * sp = dp - step * width;
+			for (int x = 0; x < width; x++){
+				(*dp++) = (*sp++);
+			}
+		}
+	}
 
-float * copyalloc_image_gpu(float * image_host,
-						size_t* dstride, // in floats !
-		                int width,
-						int height)
+	// vertical shift dy < 0 - up
+	for (int m = 0; m > dy; m-= step) { // only if dy < 0 (up)
+		for (int y = 0; y < height - step; y++){
+			float * dp = image + (y * width);
+			float * sp = dp + step * width;
+			for (int x = 0; x < width; x++){
+				(*dp++) = (*sp++);
+			}
+		}
+	}
+
+	// horizontal shift dx > 0 - right, dx < 0 - left
+	for (int m = 0; m < dx; m+= step) { // only if dx > 0 (right)
+		for (int y = 0; y < height; y++){
+			float * dp = image + (y * width) + width - 1;
+			float * sp = dp - step;
+			for (int x = 0; x < (width - step); x++){
+				(*dp--) = (*sp--);
+			}
+		}
+	}
+
+	// horizontal shift dx < 0 - left
+	for (int m = 0; m > dx; m-= step) { // only if dx < 0 (left)
+		for (int y = 0; y < height; y++){
+			float * dp = image + (y * width);
+			float * sp = dp + step;
+			for (int x = 0; x < (width - step); x++){
+				(*dp++) = (*sp++);
+			}
+		}
+	}
+}
+
+void update_image_gpu(
+		float * image_host,
+		float * image_gpu,
+		size_t  dstride, // in floats !
+		int     width,
+		int     height){
+    checkCudaErrors(cudaMemcpy2D(
+    		image_gpu,
+            dstride, //  * sizeof(float),
+			image_host,
+			width * sizeof(float), // make in 16*n?
+            width * sizeof(float),
+			height,
+			cudaMemcpyHostToDevice));
+}
+
+float * copyalloc_image_gpu(
+		float * image_host,
+		size_t* dstride, // in floats !
+		int width,
+		int height)
 {
 	float *image_gpu;
     checkCudaErrors(cudaMallocPitch((void **)&image_gpu, dstride, width * sizeof(float), height));
+    update_image_gpu(
+    		image_host,
+    		image_gpu,
+    		*dstride, // in floats !
+    		width,
+    		height);
+    /*
     checkCudaErrors(cudaMemcpy2D(
     		image_gpu,
             *dstride, //  * sizeof(float),
@@ -154,6 +237,7 @@ float * copyalloc_image_gpu(float * image_host,
             width * sizeof(float),
 			height,
 			cudaMemcpyHostToDevice));
+	*/
     return image_gpu;
 }
 
@@ -568,6 +652,8 @@ int main(int argc, char **argv)
 
     //initialize CUDA
     findCudaDevice(argc, (const char **)argv);
+
+    float fat_zero = 1000.0f; // 300.0f; // 30.0;
 
 #if TEST_LWIR
     const char* kernel_file[] = {
@@ -996,7 +1082,6 @@ int main(int argc, char **argv)
 			TILESX * TILESY);                // int height);
 
 
-//    for (int ncam = 0; ncam < NUM_CAMS; ncam++) {
     for (int ncam = 0; ncam < num_cams; ncam++) {
         readFloatsFromFile(
         		host_kern_buf, // float * data, // allocated array
@@ -1493,7 +1578,7 @@ int main(int argc, char **argv)
 				color_weights[0], // 0.25,  // float             scale0,             // scale for R
 				color_weights[1], // 0.25,  // float             scale1,             // scale for B
 				color_weights[2], // 0.5,   // float             scale2,             // scale for G
-				30.0 * 30.0,                // float             fat_zero2,           // here - absolute
+				fat_zero * fat_zero,                // float             fat_zero2,           // here - absolute
 				gpu_ftasks,                 // float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
 				tp_task_size,               // int               num_tiles) // number of tiles in task
 				TILESX,                     // int               tilesx,             // number of tile rows
@@ -1618,7 +1703,7 @@ int main(int argc, char **argv)
 				color_weights[0], // 0.25,     // float             scale0,             // scale for R
 				color_weights[1], // 0.25,     // float             scale1,             // scale for B
 				color_weights[2], // 0.5,      // float             scale2,             // scale for G
-				30.0*30.0,                     // float             fat_zero2,          // here - absolute (squared)
+				fat_zero*fat_zero,                     // float             fat_zero2,          // here - absolute (squared)
 				gpu_ftasks,                    // float            * gpu_ftasks,        // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
 				tp_task_size,                  // int               num_tiles) // number of tiles in task
 				TILESX,                        // int               tilesx,             // number of tile rows
@@ -1662,7 +1747,7 @@ int main(int argc, char **argv)
 				(float *) 0, // corr_weights,                  // float           * corr_weights,       // null or per-tile weight (fat_zero2 will be divided by it)
 				dstride_corr_combo/sizeof(float),    // const size_t      corr_stride,        // in floats
 				gpu_corrs_combo,                     // float           * gpu_corrs,          // correlation output data (pixel domain)
-				30.0 * 30.0,                         // float             fat_zero2,           // here - absolute
+				fat_zero * fat_zero,                         // float             fat_zero2,           // here - absolute
 				CORR_OUT_RAD);                       // int               corr_radius);        // radius of the output correlation (7 for 15x15)
 #else
     	checkCudaErrors(cudaDeviceSynchronize());
@@ -1674,7 +1759,7 @@ int main(int argc, char **argv)
 				(float *) 0, // corr_weights,        // float           * corr_weights,       // null or per-tile weight (fat_zero2 will be divided by it)
 				dstride_corr/sizeof(float),          // const size_t      corr_stride,        // in floats
 				gpu_corrs,                           // float           * gpu_corrs,          // correlation output data (pixel domain)
-				30.0 * 30.0,                         // float             fat_zero2,           // here - absolute
+				fat_zero * fat_zero,                         // float             fat_zero2,           // here - absolute
 				CORR_OUT_RAD);                       // int               corr_radius);        // radius of the output correlation (7 for 15x15)
 #endif
     	getLastCudaError("Kernel failure:corr2D_normalize");
@@ -1785,12 +1870,62 @@ int main(int argc, char **argv)
 			corr_img_size,             // int           size, // length in elements
 			result_corr_td_norm_file); // 			   const char *  path) // file path
 #endif
+#if 1 // export TD intra
+    int intra_corr_size_td =   num_corrs * DTT_SIZE2*DTT_SIZE2;
+    cpu_corr_td = (float *)malloc(intra_corr_size_td * sizeof(float));
+    checkCudaErrors(cudaMemcpy2D(
+    		cpu_corr_td,
+			(DTT_SIZE2*DTT_SIZE2) * sizeof(float),
+			gpu_corrs_td,
+			dstride_corr_td,
+			(DTT_SIZE2*DTT_SIZE2) * sizeof(float),
+			num_corrs,
+			cudaMemcpyDeviceToHost));
+    // Reuse the same corr_img for TD images - each tile is still 16x16 (corr was 15x15 and gap)
+    for (int ict = 0; ict < num_corr_indices; ict++){
+    	int ctt = ( cpu_corr_indices[ict] >>  CORR_NTILE_SHIFT);
+    	int cpair = cpu_corr_indices[ict] & ((1 << CORR_NTILE_SHIFT) - 1);
+    	int ty = ctt / TILESX;
+    	int tx = ctt % TILESX;
+    	int src_offs0 = ict * DTT_SIZE2*DTT_SIZE2;
+    	int dst_offs0 = cpair * (num_tiles * 16 * 16) +  (ty * 16 * TILESX * 16) + (tx * 16);
+    	for (int iquad = 0; iquad < 4; iquad ++) {
+    		int iqy = (iquad >> 1) & 1;
+    		int iqx = (iquad >> 0) & 1;
+    		for (int iy = 0; iy < DTT_SIZE; iy++){
+    			int src_offs = src_offs0 + iy * DTT_SIZE + iquad * DTT_SIZE * DTT_SIZE;
+    			int dst_offs = dst_offs0 + (iy + DTT_SIZE * iqy)* (TILESX * 16) + iqx * DTT_SIZE;
+    			for (int ix = 0; ix < DTT_SIZE; ix++){
+    				corr_img[dst_offs++] = cpu_corr_td[src_offs++];
+    			}
+    		}
+    	}
+    }
+#ifndef NSAVE_CORR
+    printf("Writing intrascene phase correlation TD data");
+    writeFloatsToFile(
+    		corr_img,                  // float *       data, // allocated array
+			corr_img_size,             // int           size, // length in elements
+			"clt/aux_intrascene-TD.raw"); // 			   const char *  path) // file path
+#endif
+
+
+
+    free (cpu_corr_td);
+#endif  // if 1
+    // reuse image, export TD data
+
+
+
+
     free (cpu_corr);
     free (cpu_corr_indices);
     free (corr_img);
 
 #endif // // QUAD_COMBINE#else
 #endif // ifndef NOCORR_TD
+
+
 
 
 // Testing "interframe" correlation with itself, assuming direct convert already ran
@@ -1803,6 +1938,84 @@ int main(int argc, char **argv)
     int num_sel_sensors = 16; // 15; // 16;
     num_pairs = num_sel_sensors+1;
     num_corr_indices = num_pairs * num_tiles;
+    int is_bayer = 0;
+    int image_dx = 2;
+    int image_dy = 0;
+
+    float            * gpu_clt_ref_h            [num_cams];
+    float           ** gpu_clt_ref;    //            [NUM_CAMS];
+    for (int ncam = 0; ncam < num_cams; ncam++) {
+       gpu_clt_ref_h[ncam] = alloc_kernel_gpu(TILESY * TILESX * num_colors * 4 * DTT_SIZE * DTT_SIZE);
+    }
+    gpu_clt_ref =      copyalloc_pointers_gpu (gpu_clt_ref_h,  num_cams); // NUM_CAMS);
+
+    // use gpu_images and convert to gpu_clt_ref
+
+	convert_direct<<<grid_tp,threads_tp>>>( // called with a single block, CONVERT_DIRECT_INDEXING_THREADS threads
+			num_cams,              // int                num_cams,           // actual number of cameras
+			num_colors,            // int                num_colors,         // actual number of colors: 3 for RGB, 1 for LWIR/mono
+			fgpu_kernel_offsets,   // struct CltExtra ** gpu_kernel_offsets,
+			gpu_kernels,           // float           ** gpu_kernels,
+			gpu_images,            // float           ** gpu_images,
+			gpu_ftasks,            // float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
+			gpu_clt_ref, //******  // float           ** gpu_clt,            // [num_cams][TILESY][TILESX][num_colors][DTT_SIZE*DTT_SIZE]
+			dstride/sizeof(float), // size_t             dstride, // for gpu_images
+			tp_task_size,          // int                num_tiles) // number of tiles in task
+			0,                     // int                lpf_mask)            // apply lpf to colors : bit 0 - red, bit 1 - blue, bit2 - green
+			IMG_WIDTH,             // int                woi_width,
+			IMG_HEIGHT,            // int                woi_height,
+			KERNELS_HOR,           // int                kernels_hor,
+			KERNELS_VERT,          // int                kernels_vert);
+			gpu_active_tiles,      // int *              gpu_active_tiles,      // pointer to the calculated number of non-zero tiles
+			gpu_num_active, //);       // int *              pnum_active_tiles);  //  indices to gpu_tasks
+			TILESX); // int                tilesx)
+
+	getLastCudaError("Kernel execution failed");
+	checkCudaErrors(cudaDeviceSynchronize());
+
+	// re-read same images. shift them, update gpu_images and convert to gpu_clt;
+    for (int ncam = 0; ncam < num_cams; ncam++) {
+        readFloatsFromFile(
+        		host_kern_buf, // float * data, // allocated array
+				image_files[ncam]); // 			   char *  path) // file path
+        shift_image (
+        		host_kern_buf, // float * image,
+				IMG_WIDTH,     // int width,
+				IMG_HEIGHT,    // int height,
+				is_bayer,      // int bayer,
+				image_dx,      // int dx,
+				image_dy);     // int dy);
+        update_image_gpu(
+        		host_kern_buf,          // float * image_host,
+				gpu_images_h[ncam], // float * image_gpu,
+				dstride,                // size_t  dstride, // in floats !
+				IMG_WIDTH,              // int     width,
+				IMG_HEIGHT);            // int     height);
+    }
+
+	convert_direct<<<grid_tp,threads_tp>>>( // called with a single block, CONVERT_DIRECT_INDEXING_THREADS threads
+			num_cams,              // int                num_cams,           // actual number of cameras
+			num_colors,            // int                num_colors,         // actual number of colors: 3 for RGB, 1 for LWIR/mono
+			fgpu_kernel_offsets,   // struct CltExtra ** gpu_kernel_offsets,
+			gpu_kernels,           // float           ** gpu_kernels,
+			gpu_images,            // float           ** gpu_images,
+			gpu_ftasks,            // float            * gpu_ftasks,         // flattened tasks, 27 floats for quad EO, 99 floats for LWIR16
+			gpu_clt,     //******  // float           ** gpu_clt,            // [num_cams][TILESY][TILESX][num_colors][DTT_SIZE*DTT_SIZE]
+			dstride/sizeof(float), // size_t             dstride, // for gpu_images
+			tp_task_size,          // int                num_tiles) // number of tiles in task
+			0,                     // int                lpf_mask)            // apply lpf to colors : bit 0 - red, bit 1 - blue, bit2 - green
+			IMG_WIDTH,             // int                woi_width,
+			IMG_HEIGHT,            // int                woi_height,
+			KERNELS_HOR,           // int                kernels_hor,
+			KERNELS_VERT,          // int                kernels_vert);
+			gpu_active_tiles,      // int *              gpu_active_tiles,      // pointer to the calculated number of non-zero tiles
+			gpu_num_active, //);       // int *              pnum_active_tiles);  //  indices to gpu_tasks
+			TILESX); // int                tilesx)
+
+	getLastCudaError("Kernel execution failed");
+	checkCudaErrors(cudaDeviceSynchronize());
+
+
     StopWatchInterface *timerINTERSELF = 0;
     sdkCreateTimer(&timerINTERSELF);
 //    int num_corr_combo_inter;
@@ -1818,7 +2031,7 @@ int main(int argc, char **argv)
     			num_cams,                      // int               num_cams,
 				sel_sensors,                   // int               sel_sensors,
 				gpu_clt,                       // float          ** gpu_clt,            // [num_cams] ->[TILES-Y][TILES-X][colors][DTT_SIZE*DTT_SIZE]
-				gpu_clt,                       // float          ** gpu_clt_ref,        // [num_cams] ->[TILES-Y][TILES-X][colors][DTT_SIZE*DTT_SIZE]
+				gpu_clt_ref, // *********      // float          ** gpu_clt_ref,        // [num_cams] ->[TILES-Y][TILES-X][colors][DTT_SIZE*DTT_SIZE]
 				num_colors,                    // int               colors,             // number of colors (3/1)
 				color_weights[0], // 0.25,     // float             scale0,             // scale for R
 				color_weights[1], // 0.25,     // float             scale1,             // scale for B
@@ -1846,7 +2059,7 @@ int main(int argc, char **argv)
 				(float *) 0, // corr_weights,        // float           * corr_weights,       // null or per-tile weight (fat_zero2 will be divided by it)
 				dstride_corr/sizeof(float),          // const size_t      corr_stride,        // in floats
 				gpu_corrs,                           // float           * gpu_corrs,          // correlation output data (pixel domain)
-				30.0 * 30.0,                         // float             fat_zero2,           // here - absolute
+				fat_zero * fat_zero,                         // float             fat_zero2,           // here - absolute
 				CORR_OUT_RAD);                       // int               corr_radius);        // radius of the output correlation (7 for 15x15)
     	getLastCudaError("Kernel failure:corr2D_normalize");
     	checkCudaErrors(cudaDeviceSynchronize());
@@ -1989,6 +2202,12 @@ int main(int argc, char **argv)
     free (cpu_corr);
     free (cpu_corr_indices);
     free (corr_img);
+
+    for (int ncam = 0; ncam < num_cams; ncam++){
+    	checkCudaErrors(cudaFree(gpu_clt_ref_h[ncam]));
+    }
+    checkCudaErrors(cudaFree(gpu_clt_ref));
+
 #endif    // #ifdef CORR_INTER_SELF
 
 

@@ -437,6 +437,7 @@ __constant__ float lpf_rb_corr[64]={ // modify if needed
 				0.32891038f, 0.30456742f, 0.26124917f, 0.20786692f, 0.15413642f, 0.10818204f, 0.07536856f, 0.05845371f,
 				0.22914618f, 0.21218686f, 0.18200779f, 0.14481729f, 0.10738418f, 0.07536856f, 0.05250797f, 0.04072369f,
 				0.17771927f, 0.16456610f, 0.14116007f, 0.11231618f, 0.08328412f, 0.05845371f, 0.04072369f, 0.03158414f
+
 		};
 __constant__ float lpf_corr[64]={ // modify if needed
 				1.00000000f, 0.87041007f, 0.65943687f, 0.43487258f, 0.24970076f, 0.12518080f, 0.05616371f, 0.02728573f,
@@ -447,6 +448,7 @@ __constant__ float lpf_corr[64]={ // modify if needed
 				0.12518080f, 0.10895863f, 0.08254883f, 0.05443770f, 0.03125774f, 0.01567023f, 0.00703062f, 0.00341565f,
 				0.05616371f, 0.04888546f, 0.03703642f, 0.02442406f, 0.01402412f, 0.00703062f, 0.00315436f, 0.00153247f,
 				0.02728573f, 0.02374977f, 0.01799322f, 0.01186582f, 0.00681327f, 0.00341565f, 0.00153247f, 0.00074451f
+
 		};
 
 __constant__ float LoG_corr[64]={ // modify if needed high-pass filter before correlation to fit into float range
@@ -1389,7 +1391,6 @@ extern "C" __global__ void combine_inter(     // combine per-senor interscene co
     	clt        += DTT_SIZE1;
     	mem_corr   += DTT_SIZE;
     }
-    corr_offset++;
 
 }
 
@@ -1825,7 +1826,7 @@ extern "C" __global__ void correlate2D_inner(
  * Combine multiple correlation pairs for quad (square) camera: 2 or 4 ortho into a single clt tile,
  * and separately the two diagonals into another single one
  * When adding vertical pairs to the horizontal, each quadrant is transposed, and the Q1 and Q2 are also swapped.
- * when combining tho diagonals (down-right and up-right), the data in quadrants Q2 and Q3 is negated
+ * when combining two diagonals (down-right and up-right), the data in quadrants Q2 and Q3 is negated
  * (corresponds to a vertical flip).
  * Data can be added to the existing one (e.g. for the inter-scene accumulation of the compatible correlations).
  * This is an outer kernel that calls the inner one with CDP, this one should be configured as corr2D_combine<<<1,1>>>
