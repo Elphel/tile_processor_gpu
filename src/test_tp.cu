@@ -1109,10 +1109,12 @@ int main(int argc, char **argv)
             int task_txy = tx + (ty << 16);
             float task_target_disparity = DBG_DISPARITY;
             float * tp = ftask_data + task_size * nt;
-            *(tp++) =  *(float *) &task_task;
-            *(tp++) =  *(float *) &task_txy;
-            *(tp++) =  task_target_disparity;
-            tp += 2; // skip centerX, centerY
+            *(tp + TP_TASK_TASK_OFFSET) =    *(float *) &task_task;
+            *(tp + TP_TASK_TXY_OFFSET) =      *(float *) &task_txy;
+            *(tp + TP_TASK_DISPARITY_OFFSET) =  task_target_disparity;
+//            tp += 2; // skip centerX, centerY
+            *(tp + TP_TASK_SCALE_OFFSET) =  0; // 0.5f; // ,0; // scale, 0 - old way, just set
+            tp+= TP_TASK_XY_OFFSET;
             for (int ncam = 0; ncam < num_cams; ncam++) {
             	*(tp++) = tile_coords_h[ncam][nt][0];
             	*(tp++) = tile_coords_h[ncam][nt][1];
@@ -1385,15 +1387,15 @@ int main(int argc, char **argv)
     printf("new_task txy = 0x%x\n", *(int *) (ftask_data1 + task_size * DBG_TILE + 1)) ; // task_data1[DBG_TILE].txy);
         for (int ncam = 0; ncam < num_cams; ncam++){
             printf("camera %d pX old %f new %f diff = %f\n", ncam,
-            		 *(ftask_data  + task_size * DBG_TILE + tp_task_xy_offset + 2*ncam + 0),
-            		 *(ftask_data1 + task_size * DBG_TILE + tp_task_xy_offset + 2*ncam + 0),
-            		 (*(ftask_data + task_size * DBG_TILE + tp_task_xy_offset + 2*ncam + 0)) -
-            		 (*(ftask_data1 + task_size * DBG_TILE + tp_task_xy_offset + 2*ncam + 0)));
+            		 *(ftask_data  + task_size * DBG_TILE + TP_TASK_XY_OFFSET + 2*ncam + 0),
+            		 *(ftask_data1 + task_size * DBG_TILE + TP_TASK_XY_OFFSET + 2*ncam + 0),
+            		 (*(ftask_data + task_size * DBG_TILE + TP_TASK_XY_OFFSET + 2*ncam + 0)) -
+            		 (*(ftask_data1 + task_size * DBG_TILE + TP_TASK_XY_OFFSET + 2*ncam + 0)));
             printf("camera %d pY old %f new %f diff = %f\n", ncam,
-           		 *(ftask_data  + task_size * DBG_TILE + tp_task_xy_offset + 2*ncam + 1),
-           		 *(ftask_data1 + task_size * DBG_TILE + tp_task_xy_offset + 2*ncam + 1),
-           		 (*(ftask_data + task_size * DBG_TILE + tp_task_xy_offset + 2*ncam + 1)) -
-           		 (*(ftask_data1 + task_size * DBG_TILE + tp_task_xy_offset + 2*ncam + 1)));
+           		 *(ftask_data  +  task_size * DBG_TILE + TP_TASK_XY_OFFSET + 2*ncam + 1),
+           		 *(ftask_data1 +  task_size * DBG_TILE + TP_TASK_XY_OFFSET + 2*ncam + 1),
+           		 (*(ftask_data +  task_size * DBG_TILE + TP_TASK_XY_OFFSET + 2*ncam + 1)) -
+           		 (*(ftask_data1 + task_size * DBG_TILE + TP_TASK_XY_OFFSET + 2*ncam + 1)));
         }
 #endif //#ifdef 	DBG_TILE
 #endif // TEST_GEOM_CORR
