@@ -35,7 +35,7 @@
 // #define NOTEXTURES
 // #define NOTEXTURE_RGBA
 #define SAVE_CLT
-//#define NO_DP
+#define NO_DP
 #define CORR_INTER_SELF 1
 
 
@@ -392,7 +392,7 @@ void generate_RBGA_host(
 		float             cpu_params[5],      // mitigating CUDA_ERROR_INVALID_PTX
 		float             weights[3],         // scale for R,B,G should be host_array, not gpu
 		int               dust_remove,        // Do not reduce average weight when only one image differs much from the average
-		int               keep_weights,       // return channel weights after A in RGBA (was removed)
+		int               keep_weights,       // return channel weights after A in RGBA (was removed) (should be 0 if gpu_texture_rbg)?
 		const size_t      texture_rbga_stride,     // in floats
 		float           * gpu_texture_tiles)  // (number of colors +1 + ?)*16*16 rgba texture tiles
 {
@@ -611,7 +611,7 @@ void generate_RBGA_host(
 				 min_agree,                       // float             min_agree,          // minimal number of channels to agree on a point (real number to work with fuzzy averages)
 				 weights,                         // float             weights[3],         // scale for R,B,G
 				 dust_remove,                     // int               dust_remove,        // Do not reduce average weight when only one image differs much from the average
-				 0,                               // int               keep_weights,       // return channel weights after A in RGBA (was removed) (should be 0 if gpu_texture_rbg)?
+				 keep_weights,                    // int               keep_weights,       // return channel weights after A in RGBA (was removed) (should be 0 if gpu_texture_rbg)?
 				 // combining both non-overlap and overlap (each calculated if pointer is not null )
 				 texture_rbga_stride,             // size_t      texture_rbg_stride, // in floats
 				 gpu_texture_tiles,               // float           * gpu_texture_rbg,     // (number of colors +1 + ?)*16*16 rgba texture tiles
@@ -914,7 +914,7 @@ int main(int argc, char **argv)
 		 }
     }
 
-    int keep_texture_weights = 0; // 1; // try with 0 also
+    int keep_texture_weights = 3; // 0; // 1; // try with 0 also
     int texture_colors = num_colors; // 3; // result will be 3+1 RGBA (for mono - 2)
 
     int KERN_TILES = KERNELS_HOR *  KERNELS_VERT * num_colors; // NUM_COLORS;
@@ -1163,6 +1163,7 @@ int main(int argc, char **argv)
     gpu_generate_RBGA_params = (float *) copyalloc_kernel_gpu((float * ) generate_RBGA_params, sizeof(generate_RBGA_params));
 
 ///    int tile_texture_size = (texture_colors + 1 + (keep_texture_weights? (NUM_CAMS + texture_colors + 1): 0)) *256;
+    // in Java always allocated as for keep_texture_weights = 1;
     int tile_texture_layers = (texture_colors + 1 + (keep_texture_weights? (num_cams + texture_colors + 1): 0));
     int tile_texture_size = tile_texture_layers *256;
 
@@ -2325,6 +2326,7 @@ int main(int argc, char **argv)
     						gpu_generate_RBGA_params,
     						gpu_color_weights,     // float             weights[3],         // scale for R
     						1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
+							keep_texture_weights,  // int               keep_weights,       // return channel weights after A in RGBA (was removed) (should be 0 if gpu_texture_rbg)?
     		    	// combining both non-overlap and overlap (each calculated if pointer is not null )
     						dstride_textures/sizeof(float), // size_t            texture_stride,     // in floats (now 256*4 = 1024)  // may be 0 if not needed
     						gpu_textures,         // float           * gpu_texture_tiles,
@@ -2350,6 +2352,7 @@ int main(int argc, char **argv)
 						 sizeof(int),
 						 cudaMemcpyDeviceToHost));
 				 printf("cpu_pnum_texture_tiles = %d\n",  cpu_pnum_texture_tiles);
+				 printf("tile_texture_layers = %d\n",     tile_texture_layers);
 #endif
 
 
@@ -2501,7 +2504,7 @@ int main(int argc, char **argv)
 				generate_RBGA_params, //		float             cpu_params[5],      // mitigating CUDA_ERROR_INVALID_PTX
 				gpu_color_weights,     // float             weights[3],         // scale for R
 	            1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
-	            0,                     // int               keep_weights,       // return channel weights after A in RGBA
+				keep_texture_weights,  // int               keep_weights,       // return channel weights after A in RGBA
 				dstride_textures_rbga/sizeof(float), // 	const size_t      texture_rbga_stride,     // in floats
 				gpu_textures_rbga);     // 	float           * gpu_texture_tiles)    // (number of colors +1 + ?)*16*16 rgba texture tiles
 #else
@@ -2532,7 +2535,7 @@ int main(int argc, char **argv)
 				gpu_generate_RBGA_params,
 				gpu_color_weights,     // float             weights[3],         // scale for R
 	            1,                     // int               dust_remove,        // Do not reduce average weight when only one image differes much from the average
-	            0,                     // int               keep_weights,       // return channel weights after A in RGBA
+				keep_texture_weights,  // int               keep_weights,       // return channel weights after A in RGBA
 				dstride_textures_rbga/sizeof(float), // 	const size_t      texture_rbga_stride,     // in floats
 				gpu_textures_rbga);     // 	float           * gpu_texture_tiles)    // (number of colors +1 + ?)*16*16 rgba texture tiles
 
