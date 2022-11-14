@@ -2350,13 +2350,16 @@ extern "C" __global__ void generate_RBGA(
 	 int texture_width =        (*(woi + 2) + 1)* DTT_SIZE;
 	 int texture_tiles_height = (*(woi + 3) + 1) * DTT_SIZE;
 	 int texture_slices =       colors + 1;
+	 if (keep_weights & 2){
+		 texture_slices += colors * num_cams;
+	 }
 
 	 if (threadIdx.x == 0) {
 
 		    dim3 threads2((1 << THREADS_DYNAMIC_BITS), 1, 1);
 		    int blocks_x = (texture_width + ((1 << (THREADS_DYNAMIC_BITS + DTT_SIZE_LOG2 )) - 1)) >> (THREADS_DYNAMIC_BITS + DTT_SIZE_LOG2);
 		    dim3 blocks2 (blocks_x, texture_tiles_height * texture_slices, 1); // each thread - 8 vertical
-		    clear_texture_rbga<<<blocks2,threads2>>>( // illegal value error
+		    clear_texture_rbga<<<blocks2,threads2>>>( // add clearing of multi-sensor output (keep_weights & 2 !=0)
 		    		texture_width,
 					texture_tiles_height * texture_slices, // int               texture_slice_height,
 					texture_rbga_stride,                   // const size_t      texture_rbga_stride,     // in floats 8*stride
@@ -2378,7 +2381,7 @@ extern "C" __global__ void generate_RBGA(
 			    dim3 grid_texture((ntt + TEXTURE_TILES_PER_BLOCK-1) / TEXTURE_TILES_PER_BLOCK,1,1); // TEXTURE_TILES_PER_BLOCK = 1
 			    int ti_offset = (pass & 3) * (width * (tilesya >> 2)); //  (TILES-X * (TILES-YA >> 2));  // 1/4
 			    if (border_tile){
-			    	ti_offset += width * (tilesya >> 2) - ntt;; // TILES-X * (TILES-YA >> 2) - ntt;
+			    	ti_offset += width * (tilesya >> 2) - ntt; // TILES-X * (TILES-YA >> 2) - ntt;
 			    }
 #ifdef DEBUG12
 				printf("\ngenerate_RBGA() pass= %d, border_tile= %d, ti_offset= %d, ntt=%d\n",
@@ -3762,7 +3765,7 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 		return; // should not happen
 	}
 	// if no extra and no overlap -> nothing remains, return
-	if (gpu_texture_rbg && (texture_rbg_stride != 0)) { // generate RGBA (overlapped)
+	if (gpu_texture_rbg && (texture_rbg_stride != 0)) { // generate RGBA (overlapped) // keep_weights
 #ifdef DEBUG7A
 		if ((tile_num == DBG_TILE)  && (threadIdx.x == 0) && (threadIdx.y == 0)){
 //			printf("\ntextures_accumulate accumulating tile = %d, tile_code= %d, border_tile=%d\n",
@@ -3780,7 +3783,7 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 		__syncthreads();// __syncwarp();
 #endif // DEBUG12
 		int alpha_mode = alphaIndex[tile_code]; // only 4 lowest bits
-		if (!alpha_mode){ // only multiply if needed, alpha_mode == 0 - keep as is.
+		if (!alpha_mode){ // only multiply if needed, alpha_mode == 0 - keep as is. FIXME: alpha_mode ???
 			for (int pass = 0; pass < 8; pass ++) {
 				int row = pass * 2 + (threadIdx.y >> 1);
 				int col = ((threadIdx.y & 1) << 3) + threadIdx.x;
@@ -3847,7 +3850,7 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 			// always copy 3 (1) colors + alpha
 			if (colors == 3){
 #pragma unroll
-				for (int ncol = 0; ncol < colors + 1; ncol++) { // 4
+				for (int ncol = 0; ncol < 3 + 1; ncol++) { // 4
 					*(gpu_texture_rbg_gi + ncol * slice_stride) += *(rgba_i + ncol * (DTT_SIZE2 * DTT_SIZE21));
 				}
 			} else { // assuming colors = 1
@@ -3856,7 +3859,36 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 					*(gpu_texture_rbg_gi + ncol * slice_stride) += *(rgba_i + ncol * (DTT_SIZE2 * DTT_SIZE21));
 				}
 			}
-///			}
+		}
+		if (keep_weights & 2){ // copy individual sensors output
+			for (int ncam = 0; ncam < num_cams; ncam++) {
+				float * mclt_dst_ncam = mclt_debayer +  (ncam * colors ) * (MCLT_UNION_LEN);
+				if (!alpha_mode){ // only multiply if needed, alpha_mode == 0 - keep as is. FIXME: alpha_mode ???
+					for (int pass = 0; pass < 8; pass ++) {
+						int row = pass * 2 + (threadIdx.y >> 1);
+						int col = ((threadIdx.y & 1) << 3) + threadIdx.x;
+						int i  = row * DTT_SIZE21 + col;
+						int gi = row * DTT_SIZE2  + col;
+						float * mclt_dst_i = mclt_dst_ncam +  i;
+						for (int ncol = 0; ncol < colors; ncol++) {
+							*(mclt_dst_i + ncol * (MCLT_UNION_LEN)) *= alphaFade[alpha_mode][gi]; // reduce [tile_code] by LUT
+						}
+					}
+				}
+				for (int pass = 0; pass < 8; pass ++) {
+					int row = pass * 2 + (threadIdx.y >> 1);          // row    inside a tile (0..15)
+					int col = ((threadIdx.y & 1) << 3) + threadIdx.x; // column inside a tile (0..15)
+					int g_row = row + tile_y0;
+					int g_col = col + tile_x0;
+					int i  = row * DTT_SIZE21 + col;
+					int gi = g_row * texture_rbg_stride  + g_col; // offset to the top left corner
+					float * gpu_texture_rbg_gi = gpu_texture_rbg + gi + (colors + 1 + colors * ncam) * slice_stride;
+					float * mclt_dst_i = mclt_dst_ncam +  i;
+					for (int ncol = 0; ncol < colors; ncol++) { // 4
+						*(gpu_texture_rbg_gi + ncol * slice_stride) += *(mclt_dst_i + ncol * (MCLT_UNION_LEN));
+					}
+				}
+			}
 		}
 	} // 	if (gpu_texture_rbg) { // generate RGBA
 	if (calc_extra){ // gpu_diff_rgb_combo

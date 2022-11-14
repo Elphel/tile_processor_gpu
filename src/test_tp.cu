@@ -532,6 +532,9 @@ void generate_RBGA_host(
 	 int texture_width =        (cpu_woi[2] + 1) * DTT_SIZE;
 	 int texture_tiles_height = (cpu_woi[3] + 1) * DTT_SIZE;
 	 int texture_slices =       colors + 1;
+	 if (keep_weights & 2){
+		 texture_slices += colors * num_cams;
+	 }
 
 	 dim3 threads2((1 << THREADS_DYNAMIC_BITS), 1, 1);
 	 int blocks_x2 = (texture_width + ((1 << (THREADS_DYNAMIC_BITS + DTT_SIZE_LOG2 )) - 1)) >> (THREADS_DYNAMIC_BITS + DTT_SIZE_LOG2);
@@ -1175,6 +1178,9 @@ int main(int argc, char **argv)
     int rgba_width =   (TILESX+1) * DTT_SIZE;
     int rgba_height =  (TILESY+1) * DTT_SIZE;
     int rbga_slices =  texture_colors + 1; // 4/1
+    if (keep_texture_weights & 2){
+    	rbga_slices += texture_colors * num_cams;
+    }
 
     gpu_textures_rbga = alloc_image_gpu(
     		&dstride_textures_rbga,              // in bytes ! for one rgba/ya 16x16 tile
