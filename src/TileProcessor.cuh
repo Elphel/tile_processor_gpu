@@ -3783,7 +3783,7 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 		__syncthreads();// __syncwarp();
 #endif // DEBUG12
 		int alpha_mode = alphaIndex[tile_code]; // only 4 lowest bits
-		if (!alpha_mode){ // only multiply if needed, alpha_mode == 0 - keep as is. FIXME: alpha_mode ???
+		if (alpha_mode){ // only multiply if needed, alpha_mode == 0 - keep as is. FIXME: alpha_mode ???
 			for (int pass = 0; pass < 8; pass ++) {
 				int row = pass * 2 + (threadIdx.y >> 1);
 				int col = ((threadIdx.y & 1) << 3) + threadIdx.x;
@@ -3863,7 +3863,7 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 		if (keep_weights & 2){ // copy individual sensors output
 			for (int ncam = 0; ncam < num_cams; ncam++) {
 				float * mclt_dst_ncam = mclt_debayer +  (ncam * colors ) * (MCLT_UNION_LEN);
-				if (!alpha_mode){ // only multiply if needed, alpha_mode == 0 - keep as is. FIXME: alpha_mode ???
+				if (alpha_mode){ // only multiply if needed, alpha_mode == 0 - keep as is. FIXME: alpha_mode ???
 					for (int pass = 0; pass < 8; pass ++) {
 						int row = pass * 2 + (threadIdx.y >> 1);
 						int col = ((threadIdx.y & 1) << 3) + threadIdx.x;
