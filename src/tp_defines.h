@@ -62,15 +62,15 @@
 #define CORR_NTILE_SHIFT               8 // higher bits - number of a pair, other bits tile number
 // only lower bit will be used to request correlations, correlation mask will be common for all the scene
 //#define CORR_PAIRS_MASK             0x3f// lower bits used to address correlation pair for the selected tile
-#define CORR_TEXTURE_BIT               7 // bit 7 used to request texture for the tile
+//#define CORR_TEXTURE_BIT               7 // bit 7 used to request texture for the tile
 #define TASK_CORR_BITS                 4
 #define TASK_TEXTURE_N_BIT             0 // Texture with North neighbor
 #define TASK_TEXTURE_E_BIT             1 // Texture with East  neighbor
 #define TASK_TEXTURE_S_BIT             2 // Texture with South neighbor
 #define TASK_TEXTURE_W_BIT             3 // Texture with West  neighbor
-//#define TASK_TEXTURE_BIT               3 // bit to request texture calculation int task field of struct tp_task
 #define LIST_TEXTURE_BIT               7 // bit to request texture calculation
-//#define CORR_OUT_RAD                 7 // full tile (15x15), was 4 (9x9)
+#define TEXT_NTILE_SHIFT               8 // tile number shift for texture calculation (will be different from CORR_NTILE_SHIFT!)
+
 #define FAT_ZERO_WEIGHT                0.0001 // add to port weights to avoid nan
 
 #define THREADS_DYNAMIC_BITS           5 // treads in block for CDP creation of the texture list

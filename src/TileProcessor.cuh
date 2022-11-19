@@ -2749,8 +2749,10 @@ __global__ void gen_texture_list(
 #endif // DEBUG12
 //	*(gpu_texture_indices + buf_offset) = task | ((x + y * width) << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT);
 	// keep only 8 LSBs of task, use higher 24 for task number
-	*(gpu_texture_indices + buf_offset) = (task & ((1 << CORR_NTILE_SHIFT) -1)) | ((x + y * width) << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT);
-	//CORR_NTILE_SHIFT
+//	*(gpu_texture_indices + buf_offset) = (task & ((1 << TEXT_NTILE_SHIFT) -1)) | ((x + y * width) << TEXT_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT);
+	// keep only 4 lower task bits
+	*(gpu_texture_indices + buf_offset) = (task & TASK_TEXTURE_BITS) | ((x + y * width) << TEXT_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT);
+	//CORR_NTILE_SHIFT // TASK_TEXTURE_BITS
 }
 //inline __device__ int get_task_size(int num_cams){
 //	return sizeof(struct tp_task)/sizeof(float) - 6 * (NUM_CAMS - num_cams);
@@ -2822,7 +2824,7 @@ extern "C" __global__ void create_nonoverlap_list(
 	}
 ///	int cxy = gpu_tasks[num_tile].txy;
 	int cxy = get_task_txy(num_tile, gpu_ftasks, num_cams);
-	int texture_task_code = (((cxy & 0xffff) + (cxy >> 16) * width) << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT) | TASK_TEXTURE_BITS;
+	int texture_task_code = (((cxy & 0xffff) + (cxy >> 16) * width) << TEXT_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT) | TASK_TEXTURE_BITS;
 //	if (gpu_tasks[num_tile].task != 0) {
 	if (task_task != 0) {
 		nonoverlap_list[atomicAdd(pnonoverlap_length, 1)] = texture_task_code;
@@ -3401,10 +3403,10 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 	}
 	// get number of tile
 	int tile_code = gpu_texture_indices[tile_indx + gpu_texture_indices_offset]; // Added for Java, no DP
-	if ((tile_code & (1 << CORR_TEXTURE_BIT)) == 0){
+	if ((tile_code & (1 << LIST_TEXTURE_BIT)) == 0){
 		return; // nothing to do
 	}
-	int tile_num = tile_code >> CORR_NTILE_SHIFT;
+	int tile_num = tile_code >> TEXT_NTILE_SHIFT;
 #ifdef DEBUG7A
 	__syncthreads();// __syncwarp();
 	if ((tile_num == DBG_TILE)  && (threadIdx.x == 0) && (threadIdx.y == 0)){
@@ -3784,6 +3786,7 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 #endif // DEBUG12
 		int alpha_mode = alphaIndex[tile_code]; // only 4 lowest bits
 		if (alpha_mode){ // only multiply if needed, alpha_mode == 0 - keep as is. FIXME: alpha_mode ???
+			// TODO: calculate per-color average and add with (1.0-alphaFade) for colors only, no
 			for (int pass = 0; pass < 8; pass ++) {
 				int row = pass * 2 + (threadIdx.y >> 1);
 				int col = ((threadIdx.y & 1) << 3) + threadIdx.x;
@@ -3843,10 +3846,6 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 			}
 			__syncthreads();// __syncwarp();
 #endif // DEBUG12
-
-			///			if (!border_tile ||
-			///					((g_row >= 0) && (g_col >= 0) && (g_row < (DTT_SIZE * TILES-Y)) && (g_col < (DTT_SIZE * TILES-X)))){
-			///					((g_row >= 0) && (g_col >= 0) && (g_row < height) && (g_col < (DTT_SIZE * TILES-X)))){
 			// always copy 3 (1) colors + alpha
 			if (colors == 3){
 #pragma unroll
@@ -3871,7 +3870,11 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 						int gi = row * DTT_SIZE2  + col;
 						float * mclt_dst_i = mclt_dst_ncam +  i;
 						for (int ncol = 0; ncol < colors; ncol++) {
-							*(mclt_dst_i + ncol * (MCLT_UNION_LEN)) *= alphaFade[alpha_mode][gi]; // reduce [tile_code] by LUT
+//							*(mclt_dst_i + ncol * (MCLT_UNION_LEN)) *= alphaFade[alpha_mode][gi]; // reduce [tile_code] by LUT
+							float a = alphaFade[alpha_mode][gi];
+							float v = a * (*(mclt_dst_i + ncol * (MCLT_UNION_LEN))) +
+									  (1 - a) * ports_rgb_shared[ncol * num_cams + ncam];
+							*(mclt_dst_i + ncol * (MCLT_UNION_LEN)) = v; // see if ports_rgb_shared[] meeds scaling
 						}
 					}
 				}

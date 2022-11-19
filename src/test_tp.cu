@@ -1140,9 +1140,9 @@ int main(int argc, char **argv)
     	for (int tx = 0; tx < TILESX; tx++){
     		int nt = ty * TILESX + tx;
             float *tp = ftask_data + task_size * nt;
-    		int cm = (*(int *) tp) & TASK_TEXTURE_BITS;
+    		int cm = (*(int *) tp) & TASK_TEXTURE_BITS; // non-zero any of 4 lower task bits
     		if (cm){
-    			texture_indices[num_textures++] = (nt << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT);
+    			texture_indices[num_textures++] = (nt << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT); // setting  0x80 in texture indices
     		}
     	}
     }
