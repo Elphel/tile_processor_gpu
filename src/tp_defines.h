@@ -68,8 +68,8 @@
 #define TASK_TEXTURE_E_BIT             1 // Texture with East  neighbor
 #define TASK_TEXTURE_S_BIT             2 // Texture with South neighbor
 #define TASK_TEXTURE_W_BIT             3 // Texture with West  neighbor
-#define LIST_TEXTURE_BIT               7 // bit to request texture calculation
-#define TEXT_NTILE_SHIFT               8 // tile number shift for texture calculation (will be different from CORR_NTILE_SHIFT!)
+#define LIST_TEXTURE_BIT               8 // 7 // bit to request texture calculation
+#define TEXT_NTILE_SHIFT               9 // 8 // tile number shift for texture calculation (will be different from CORR_NTILE_SHIFT!)
 
 #define FAT_ZERO_WEIGHT                0.0001 // add to port weights to avoid nan
 
