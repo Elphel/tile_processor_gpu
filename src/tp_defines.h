@@ -63,11 +63,26 @@
 // only lower bit will be used to request correlations, correlation mask will be common for all the scene
 //#define CORR_PAIRS_MASK             0x3f// lower bits used to address correlation pair for the selected tile
 //#define CORR_TEXTURE_BIT               7 // bit 7 used to request texture for the tile
-#define TASK_CORR_BITS                 4
-#define TASK_TEXTURE_N_BIT             0 // Texture with North neighbor
-#define TASK_TEXTURE_E_BIT             1 // Texture with East  neighbor
-#define TASK_TEXTURE_S_BIT             2 // Texture with South neighbor
-#define TASK_TEXTURE_W_BIT             3 // Texture with West  neighbor
+//#define TASK_CORR_BITS                 4 // REMOVE!!!
+// will be temporary disabled - too many references in Java code. Any task != 0 will be OK
+#define TASK_INTER_EN                 10 // Task bit to enable interscene correlation
+#define TASK_CORR_EN                   9 // Task bit to enable intrascene correlation (pairs defined separately)
+#define TASK_TEXT_EN                   8 // task bit to enable texture generation
+
+#define TASK_TEXT_N_BIT                0 // Texture with North neighbor
+#define TASK_TEXT_NE_BIT               1 // Texture with North-East neighbor
+#define TASK_TEXT_E_BIT                2 // Texture with East neighbor
+#define TASK_TEXT_SE_BIT               3 // Texture with South-East neighbor
+#define TASK_TEXT_S_BIT                4 // Texture with South neighbor
+#define TASK_TEXT_SW_BIT               5 // Texture with South-West neighbor
+#define TASK_TEXT_W_BIT                6 // Texture with West neighbor
+#define TASK_TEXT_NW_BIT               7 // Texture with North-West neighbor
+
+//#define TASK_TEXTURE_N_BIT             0 // Texture with North neighbor
+//#define TASK_TEXTURE_E_BIT             1 // Texture with East  neighbor
+//#define TASK_TEXTURE_S_BIT             2 // Texture with South neighbor
+//#define TASK_TEXTURE_W_BIT             3 // Texture with West  neighbor
+
 #define LIST_TEXTURE_BIT               8 // 7 // bit to request texture calculation
 #define TEXT_NTILE_SHIFT               9 // 8 // tile number shift for texture calculation (will be different from CORR_NTILE_SHIFT!)
 

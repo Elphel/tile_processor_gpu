@@ -1108,7 +1108,8 @@ int main(int argc, char **argv)
         for (int tx = 0; tx < TILESX; tx++){
             int nt = ty * TILESX + tx;
 //            int task_task = 0xf | (((1 << NUM_PAIRS)-1) << TASK_CORR_BITS);
-            int task_task = 0xf | (1 << TASK_CORR_BITS); // just 1 bit, correlation selection is defined by common corr_sel bits
+//            int task_task = 0xf | (1 << TASK_CORR_BITS); // just 1 bit, correlation selection is defined by common corr_sel bits
+            int task_task = (1 << TASK_INTER_EN) | (1 << TASK_CORR_EN) | (1 << TASK_TEXT_EN); // just 1 bit, correlation selection is defined by common corr_sel bits
             int task_txy = tx + (ty << 16);
             float task_target_disparity = DBG_DISPARITY;
             float * tp = ftask_data + task_size * nt;
@@ -1142,7 +1143,7 @@ int main(int argc, char **argv)
             float *tp = ftask_data + task_size * nt;
     		int cm = (*(int *) tp) & TASK_TEXTURE_BITS; // non-zero any of 4 lower task bits
     		if (cm){
-    			texture_indices[num_textures++] = (nt << CORR_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT); // setting  0x80 in texture indices
+    			texture_indices[num_textures++] = (nt << TEXT_NTILE_SHIFT) | (1 << LIST_TEXTURE_BIT); // setting  0x80 in texture indices
     		}
     	}
     }
@@ -2385,7 +2386,7 @@ int main(int argc, char **argv)
     		    	non_overlap_layers[i] = NAN;
     		    }
     		    for (int itile = 0; itile < cpu_pnum_texture_tiles; itile++) { // if (texture_indices[itile] & ((1 << LIST_TEXTURE_BIT))){
-    		    	int ntile = texture_indices[itile] >> CORR_NTILE_SHIFT;
+    		    	int ntile = texture_indices[itile] >> TEXT_NTILE_SHIFT;
     		    	int tileX = ntile % TILESX;
     		    	int tileY = ntile / TILESX;
     		    	for (int ilayer = 0; ilayer < tile_texture_layers; ilayer++){
