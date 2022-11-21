@@ -3445,7 +3445,7 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 			rgbaw, // (float *) shr1.rgbaw,      // float * rgba,
 			// if calc_extra, rbg_tile will be ignored and output generated with blurred (debayered) data. Done so as debayered data is needed
 			// to calculate max_diff_shared
-			calc_extra,                // int     calc_extra,    // 1 - calcualate ports_rgb, max_diff
+			calc_extra, //  | (keep_weights & 2),                // int     calc_extra,    // 1 - calcualate ports_rgb, max_diff
 			ports_rgb_shared,// float ports_rgb_shared [colors][num_cams], // return to system memory (optionally pass null to skip calculation)
 			max_diff_shared, // float max_diff_shared  [num_cams], // return to system memory (optionally pass null to skip calculation)
 			max_diff_tmp,    //  float max_diff_tmp     [num_cams][TEXTURE_THREADS_PER_TILE],
@@ -3456,7 +3456,7 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 			min_agree,                 // float   min_agree,   NOT USED?   // minimal number of channels to agree on a point (real number to work with fuzzy averages)
 			weights,                   // float * chn_weights,    // color channel weights, sum == 1.0
 			dust_remove,               // int     dust_remove,    // Do not reduce average weight when only one image differs much from the average
-			(keep_weights & 1),        // int     keep_weights,   // return channel weights and rms after A in RGBA (weight are always calculated)
+			(keep_weights & 1), //  | (keep_weights & 2),        // int     keep_weights,   // return channel weights and rms after A in RGBA (weight are always calculated)
 			debug );  // int     debug );
 
 	__syncthreads(); // _syncthreads();1
@@ -3598,7 +3598,7 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 					int i  = row * DTT_SIZE21 + col;
 					float * rgba_i = rgbaw + i;
 					// always copy 3 (1) colors + alpha
-							*(rgba_i + ncol * (DTT_SIZE2 * DTT_SIZE21)) += textureBlend[idir][(threadIdx.y <<3) + threadIdx.x] * avg_val;
+					*(rgba_i + ncol * (DTT_SIZE2 * DTT_SIZE21)) += textureBlend[idir][(threadIdx.y <<3) + threadIdx.x] * avg_val;
 			/*
 					for (int pass = 0; pass < 8; pass ++) {
 						int row1 = pass * 2 + (threadIdx.y >> 1);
@@ -3674,8 +3674,37 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 				//if (alpha_mode){ // only multiply if needed, alpha_mode == 0 - keep as is. FIXME: alpha_mode ???
 				if (alpha_mode != 0xff){
 					for (int ncol = 0; ncol < colors; ncol++) {
-						// will re-use ports_rgb_shared[], if needed - average here for combined texture (see texture_averaging[sum_index] above)
-						float avg_val = ports_rgb_shared[ncol * num_cams + ncam]; // texture_averaging[0];
+						// calculate average value for blending
+						int sum_index = threadIdx.x + threadIdx.y * TEXTURE_THREADS_PER_TILE; // 0.. 31
+						texture_averaging[sum_index] = 0;
+						for (int pass = 0; pass < 8; pass ++) {
+							int row = pass * 2 + (threadIdx.y >> 1);
+							int col = ((threadIdx.y & 1) << 3) + threadIdx.x;
+							int i  = row * DTT_SIZE21 + col;
+							float * rgba_i = rgbaw + i;
+							texture_averaging[sum_index] += *(rgba_i + ncol * (DTT_SIZE2 * DTT_SIZE21));
+						}
+						__syncthreads();
+						if (threadIdx.y == 0){ // combine sums
+		#pragma unroll
+							for (int i = 1; i < 4; i++) { // reduce sums to 8
+								texture_averaging[threadIdx.x] += texture_averaging[threadIdx.x + TEXTURE_THREADS_PER_TILE * i];
+							}
+						}
+						__syncthreads();
+						if ((threadIdx.y == 0) && (threadIdx.x == 0)){ // combine sums
+		#pragma unroll
+							for (int i = 1; i < TEXTURE_THREADS_PER_TILE; i++) { // reduce sums to 8
+								texture_averaging[0] += texture_averaging[i];
+							}
+							texture_averaging[0] /= 64; // average value for uniform field
+						}
+						__syncthreads();
+						float avg_val = texture_averaging[0];
+
+						// Possible to re-use ports_rgb_shared[], if needed (change to (calc_extra | (keep_weights & 2) in tile_combine_rgba()).
+						// Now using averaging here (less noise if averaging sensor outside).
+//						float avg_val = ports_rgb_shared[ncol * num_cams + ncam]; // texture_averaging[0];
 						for (int idir = 0; idir < 8; idir ++) if ((alpha_mode & (1 << idir)) == 0) { // no tile in this direction
 							/* */
 							int row, col;
@@ -3700,17 +3729,7 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 							int i  = row * DTT_SIZE21 + col;
 							float * mclt_dst_i = mclt_dst_ncam +  i;
 							int gi = (threadIdx.y <<3) + threadIdx.x;
-							*(mclt_dst_i + ncol * (MCLT_UNION_LEN)) += textureBlend[alpha_mode][gi] * avg_val;
-/*
-							for (int pass = 0; pass < 8; pass ++) {
-								int row1 = pass * 2 + (threadIdx.y >> 1);
-								int col1 = ((threadIdx.y & 1) << 3) + threadIdx.x;
-								int i  = row1 * DTT_SIZE21 + col1;
-								int gi = row1 * DTT_SIZE2  + col1;
-								float * mclt_dst_i = mclt_dst_ncam +  i;
-								*(mclt_dst_i + ncol * (MCLT_UNION_LEN)) += textureBlend[alpha_mode][gi] * avg_val;
-							}
-*/
+							*(mclt_dst_i + ncol * (MCLT_UNION_LEN)) += textureBlend[idir][gi] * avg_val;
 						}
 						__syncthreads(); // needed?
 					}
