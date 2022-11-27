@@ -463,8 +463,8 @@ __constant__ float LoG_corr[64]={ // modify if needed high-pass filter before co
 				1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f,
 				1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f,
 				1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f,
-                                1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f,
-                                1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f
+                1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f,
+                1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f, 1.00000000f
                 };
 __constant__ float textureBlend[8][32] = {
     {0.240485f, 0.313023f, 0.368542f, 0.398588f, 0.398588f, 0.368542f, 0.313023f, 0.240485f,
@@ -3582,7 +3582,7 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 					texture_averaging[0] /= 64; // average value for uniform field
 				}
 				__syncthreads();
-				float avg_val = texture_averaging[0];
+				float avg_val = texture_averaging[0] *0.875;
 				// now add scale average value for each missing direction
 				for (int idir = 0; idir < 8; idir ++) if ((alpha_mode & (1 << idir)) == 0) { // no tile in this direction
 					/* */
@@ -3710,7 +3710,7 @@ extern "C" __global__ void textures_accumulate( // (8,4,1) (N,1,1)
 							texture_averaging[0] /= 64; // average value for uniform field
 						}
 						__syncthreads();
-						float avg_val = texture_averaging[0];
+						float avg_val = texture_averaging[0] *0.875;
 
 						// Possible to re-use ports_rgb_shared[], if needed (change to (calc_extra | (keep_weights & 2) in tile_combine_rgba()).
 						// Now using averaging here (less noise if averaging sensor outside).
